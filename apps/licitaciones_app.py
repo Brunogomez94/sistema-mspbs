@@ -2213,33 +2213,62 @@ def pagina_login():
                 password_hash = hashlib.sha256(password.encode()).hexdigest()
                 
                 try:
-                    # Verificar credenciales usando función compatible con API REST
-                    # Nota: La tabla debe estar en el esquema 'public' para que funcione con API REST
-                    query = """
-                        SELECT id, username, role, nombre_completo, ultimo_cambio_password 
-                        FROM usuarios 
-                        WHERE cedula = :cedula AND password = :password
-                    """
+                    # Obtener engine
+                    engine = get_engine()
                     
-                    user = execute_query(
-                        query, 
-                        params={'cedula': cedula, 'password': password_hash},
-                        fetch_one=True
-                    )
+                    if engine is None:
+                        st.error("No se pudo conectar a la base de datos. Verifique la configuración.")
+                        return
                     
-                    if user:
-                        # Autenticación exitosa
-                        # Si es dict (API REST), convertir a tupla para compatibilidad
+                    # Si es API REST, usar directamente
+                    if isinstance(engine, dict) and engine.get('type') == 'api_rest':
+                        client = engine['client']
+                        try:
+                            # Buscar usuario por cédula y password
+                            response = client.table('usuarios').select(
+                                'id,username,role,nombre_completo,ultimo_cambio_password'
+                            ).eq('cedula', cedula).eq('password', password_hash).limit(1).execute()
+                            
+                            if response.data and len(response.data) > 0:
+                                user_dict = response.data[0]
+                                user = (
+                                    user_dict.get('id'),
+                                    user_dict.get('username'),
+                                    user_dict.get('role'),
+                                    user_dict.get('nombre_completo'),
+                                    user_dict.get('ultimo_cambio_password')
+                                )
+                            else:
+                                user = None
+                        except Exception as e:
+                            st.error(f"Error al verificar credenciales: {e}")
+                            user = None
+                    else:
+                        # Conexión directa - usar execute_query
+                        query = """
+                            SELECT id, username, role, nombre_completo, ultimo_cambio_password 
+                            FROM usuarios 
+                            WHERE cedula = :cedula AND password = :password
+                        """
+                        
+                        user = execute_query(
+                            query, 
+                            params={'cedula': cedula, 'password': password_hash},
+                            fetch_one=True
+                        )
+                        
+                        # Si es dict, convertir a tupla
                         if isinstance(user, dict):
-                            user_tuple = (
+                            user = (
                                 user.get('id'),
                                 user.get('username'),
                                 user.get('role'),
                                 user.get('nombre_completo'),
                                 user.get('ultimo_cambio_password')
                             )
-                            user = user_tuple
-                        
+                    
+                    if user:
+                        # Autenticación exitosa
                         st.session_state.logged_in = True
                         st.session_state.user_id = user[0]
                         st.session_state.username = user[1]
