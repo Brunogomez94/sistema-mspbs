@@ -51,3 +51,8 @@ Thumbs.db
 # Database backups
 backup_postgres_*.sql
 *.sql.backup
+
+# Credentials and secrets
+CREDENCIALES_SUPABASE.txt
+*SECRETS*.toml
+*secrets*.toml
