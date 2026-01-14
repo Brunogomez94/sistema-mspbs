@@ -86,8 +86,27 @@ Este proyecto utiliza:
 - Los módulos se cargan dinámicamente desde la carpeta `apps/`
 - Cada módulo puede funcionar de forma independiente o integrado en el main_app
 
+## 🚀 Despliegue
+
+Este proyecto puede desplegarse en múltiples plataformas:
+
+- **Streamlit Cloud** (Recomendado - Gratis): [Ver guía completa](DEPLOY.md#-opción-1-streamlit-cloud-recomendado---gratis)
+- **Docker**: [Ver guía](DEPLOY.md#-opción-2-docker)
+- **Heroku**: [Ver guía](DEPLOY.md#-opción-3-heroku)
+- **Servidor Propio**: [Ver guía](DEPLOY.md#-opción-4-servidor-propio-vpscloud)
+
+Para instrucciones detalladas, consulta [DEPLOY.md](DEPLOY.md)
+
+### Despliegue Rápido en Streamlit Cloud
+
+1. Ve a [share.streamlit.io](https://share.streamlit.io)
+2. Conecta tu repositorio: `Brunogomez94/sistema-mspbs`
+3. Configura los secrets con tus credenciales de PostgreSQL
+4. ¡Despliega!
+
 ## 🔒 Seguridad
 
 - **NO** subas `secrets.toml` a control de versiones
 - Usa variables de entorno en producción
 - Mantén las credenciales seguras
+- El archivo `.gitignore` ya excluye `secrets.toml`
