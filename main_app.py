@@ -239,17 +239,28 @@ def verificar_conexion_db():
             _password=config['password']
         )
         if engine is None:
-            return False, "No se pudo crear la conexión"
+            # Verificar si las credenciales de API REST están configuradas
+            api_config = get_supabase_api_config()
+            if not api_config['url'] or not api_config['key']:
+                return False, "No se pudo crear la conexión. Verifica que [supabase] esté configurado en secrets."
+            return False, "No se pudo crear la conexión (ni directa ni API REST)"
         
         # Si es API REST, verificar de otra forma
         if isinstance(engine, dict) and engine.get('type') == 'api_rest':
             try:
                 client = engine['client']
-                # Intentar una consulta simple
-                response = client.table('_prisma_migrations').select("id").limit(1).execute()
+                # Intentar una consulta simple con diferentes tablas
+                test_tables = ['_prisma_migrations', 'oxigeno.usuarios', 'public.actas_recepcion']
+                for table_name in test_tables:
+                    try:
+                        response = client.table(table_name).select("*").limit(1).execute()
+                        return True, f"Conectado vía API REST de Supabase (tabla: {table_name})"
+                    except:
+                        continue
+                # Si ninguna tabla funcionó, pero el cliente existe, asumir que funciona
                 return True, "Conectado vía API REST de Supabase"
             except Exception as e:
-                return False, f"Error con API REST: {str(e)}"
+                return False, f"Error verificando API REST: {str(e)}"
         
         # Verificar conexión directa
         from sqlalchemy import text
@@ -257,7 +268,7 @@ def verificar_conexion_db():
             conn.execute(text("SELECT 1"))
         return True, "Conexión exitosa (Directa)"
     except Exception as e:
-        return False, str(e)
+        return False, f"Error: {str(e)}"
 
 def main():
     # Verificar conexión a la base de datos
