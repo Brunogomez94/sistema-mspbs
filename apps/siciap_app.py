@@ -3677,7 +3677,7 @@ def test_db_connection():
     """
     try:
         db_config = get_db_config()
-        engine_string = f"postgresql://{db_config['user']}:{db_config['password']}@{db_config['host']}:{db_config['port']}/{db_config['dbname']}"
+        engine_string = f"postgresql://{db_config['user']}:{db_config['password']}@{db_config['host']}:{db_config['port']}/{db_config['dbname']}?sslmode=require"
         logger.info(f"Intentando conectar a la base de datos: {db_config['dbname']} en {db_config['host']}:{db_config['port']}")
         
         engine = create_engine(engine_string)
@@ -4899,7 +4899,7 @@ def crear_indices_siciap():
     try:
         # Configuración de base de datos
         db_config = get_db_config()
-        engine_string = f"postgresql://{db_config['user']}:{db_config['password']}@{db_config['host']}:{db_config['port']}/{db_config['dbname']}"
+        engine_string = f"postgresql://{db_config['user']}:{db_config['password']}@{db_config['host']}:{db_config['port']}/{db_config['dbname']}?sslmode=require"
         engine = create_engine(engine_string)
         
         with engine.connect() as conn:
@@ -4932,7 +4932,7 @@ def buscar_producto_integrado(codigo):
     try:
         # Configuración de base de datos
         db_config = get_db_config()
-        engine_string = f"postgresql://{db_config['user']}:{db_config['password']}@{db_config['host']}:{db_config['port']}/{db_config['dbname']}"
+        engine_string = f"postgresql://{db_config['user']}:{db_config['password']}@{db_config['host']}:{db_config['port']}/{db_config['dbname']}?sslmode=require"
         engine = create_engine(engine_string)
         
         # Resultados
