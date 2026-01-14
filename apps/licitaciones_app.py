@@ -3247,49 +3247,97 @@ def pagina_gestionar_proveedores():
         
         # Obtener proveedores con filtros
         try:
-            engine = safe_get_engine()
+            api_config = get_supabase_api_config()
+            engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
             if engine is None:
                 st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
                 return
-            with engine.connect() as conn:
-                query_base = """
-                    SELECT id, ruc, razon_social, direccion, correo_electronico, 
-                           telefono, contacto_nombre, activo, fecha_registro, fecha_actualizacion
-                    FROM oxigeno.proveedores
-                    WHERE 1=1
-                """
-                params = {}
-                
-                if filtro_ruc:
-                    query_base += " AND ruc ILIKE :ruc"
-                    params['ruc'] = f"%{filtro_ruc}%"
-                
-                if filtro_nombre:
-                    query_base += " AND razon_social ILIKE :nombre"
-                    params['nombre'] = f"%{filtro_nombre}%"
-                
-                if not mostrar_inactivos:
-                    query_base += " AND activo = TRUE"
-                
-                query_base += " ORDER BY razon_social"
-                
-                query = text(query_base)
-                result = conn.execute(query, params)
-                
-                proveedores = []
-                for row in result:
-                    proveedores.append({
-                        'id': row[0],
-                        'ruc': row[1],
-                        'razon_social': row[2],
-                        'direccion': row[3] or 'No especificada',
-                        'correo_electronico': row[4] or 'No especificado',
-                        'telefono': row[5] or 'No especificado',
-                        'contacto_nombre': row[6] or 'No especificado',
-                        'activo': '✅ Activo' if row[7] else '❌ Inactivo',
-                        'fecha_registro': row[8],
-                        'fecha_actualizacion': row[9]
-                    })
+            
+            proveedores = []
+            
+            # Si es API REST, usar el cliente directamente
+            if isinstance(engine, dict) and engine.get('type') == 'api_rest':
+                client = engine['client']
+                try:
+                    # Intentar con diferentes nombres de tabla
+                    table_name = 'proveedores'  # Supabase API REST usa el nombre sin esquema
+                    
+                    # Obtener todos los proveedores
+                    response = client.table(table_name).select("*").execute()
+                    
+                    if response.data:
+                        # Aplicar filtros en Python
+                        for row in response.data:
+                            # Filtro por RUC
+                            if filtro_ruc and filtro_ruc.lower() not in str(row.get('ruc', '')).lower():
+                                continue
+                            
+                            # Filtro por nombre
+                            if filtro_nombre and filtro_nombre.lower() not in str(row.get('razon_social', '')).lower():
+                                continue
+                            
+                            # Filtro por activo
+                            if not mostrar_inactivos and not row.get('activo', True):
+                                continue
+                            
+                            proveedores.append({
+                                'id': row.get('id'),
+                                'ruc': row.get('ruc', ''),
+                                'razon_social': row.get('razon_social', ''),
+                                'direccion': row.get('direccion') or 'No especificada',
+                                'correo_electronico': row.get('correo_electronico') or 'No especificado',
+                                'telefono': row.get('telefono') or 'No especificado',
+                                'contacto_nombre': row.get('contacto_nombre') or 'No especificado',
+                                'activo': '✅ Activo' if row.get('activo', True) else '❌ Inactivo',
+                                'fecha_registro': row.get('fecha_registro'),
+                                'fecha_actualizacion': row.get('fecha_actualizacion')
+                            })
+                        
+                        # Ordenar por razón social
+                        proveedores.sort(key=lambda x: x['razon_social'])
+                except Exception as e:
+                    st.warning(f"⚠️ No se pudo acceder a la tabla 'proveedores' con API REST. Asegúrate de que la tabla existe en el esquema 'public' o 'oxigeno' en Supabase. Error: {e}")
+                    return
+            else:
+                # Conexión directa (fallback)
+                with engine.connect() as conn:
+                    query_base = """
+                        SELECT id, ruc, razon_social, direccion, correo_electronico, 
+                               telefono, contacto_nombre, activo, fecha_registro, fecha_actualizacion
+                        FROM oxigeno.proveedores
+                        WHERE 1=1
+                    """
+                    params = {}
+                    
+                    if filtro_ruc:
+                        query_base += " AND ruc ILIKE :ruc"
+                        params['ruc'] = f"%{filtro_ruc}%"
+                    
+                    if filtro_nombre:
+                        query_base += " AND razon_social ILIKE :nombre"
+                        params['nombre'] = f"%{filtro_nombre}%"
+                    
+                    if not mostrar_inactivos:
+                        query_base += " AND activo = TRUE"
+                    
+                    query_base += " ORDER BY razon_social"
+                    
+                    query = text(query_base)
+                    result = conn.execute(query, params)
+                    
+                    for row in result:
+                        proveedores.append({
+                            'id': row[0],
+                            'ruc': row[1],
+                            'razon_social': row[2],
+                            'direccion': row[3] or 'No especificada',
+                            'correo_electronico': row[4] or 'No especificado',
+                            'telefono': row[5] or 'No especificado',
+                            'contacto_nombre': row[6] or 'No especificado',
+                            'activo': '✅ Activo' if row[7] else '❌ Inactivo',
+                            'fecha_registro': row[8],
+                            'fecha_actualizacion': row[9]
+                        })
                 
                 if proveedores:
                     # Convertir a DataFrame para mejor visualización
