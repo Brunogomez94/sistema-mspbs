@@ -187,7 +187,7 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
         
         if query_lower.startswith('select'):
             # Intentar parsear SELECT básico
-            # Ejemplo: SELECT id, username FROM oxigeno.usuarios WHERE cedula = :cedula
+            # Ejemplo: SELECT id, username FROM usuarios WHERE cedula = :cedula
             try:
                 # Extraer nombre de tabla (asumiendo formato: FROM schema.table)
                 if 'from' in query_lower:
@@ -3720,7 +3720,7 @@ def pagina_administrar_usuarios():
             with engine.connect() as conn:
                 query = text("""
                     SELECT id, cedula, username, nombre_completo, role, fecha_creacion, ultimo_cambio_password
-                    FROM oxigeno.usuarios
+                    FROM public.usuarios
                     ORDER BY username
                 """)
                 
@@ -3889,8 +3889,8 @@ def pagina_administrar_usuarios():
                         with engine.connect() as conn:
                             query = text("""
                                 SELECT 
-                                    (SELECT COUNT(*) FROM oxigeno.usuarios WHERE username = :username) as count_username,
-                                    (SELECT COUNT(*) FROM oxigeno.usuarios WHERE cedula = :cedula) as count_cedula
+                                    (SELECT COUNT(*) FROM public.usuarios WHERE username = :username) as count_username,
+                                    (SELECT COUNT(*) FROM public.usuarios WHERE cedula = :cedula) as count_cedula
                             """)
                             result = conn.execute(query, {'username': username, 'cedula': cedula})
                             counts = result.fetchone()
@@ -3904,7 +3904,7 @@ def pagina_administrar_usuarios():
                                 password_hash = hashlib.sha256(password.encode()).hexdigest()
                                 
                                 query = text("""
-                                    INSERT INTO oxigeno.usuarios 
+                                    INSERT INTO public.usuarios 
                                     (cedula, username, password, nombre_completo, role, ultimo_cambio_password)
                                     VALUES (:cedula, :username, :password, :nombre, :rol, 
                                            CASE WHEN :requiere_cambio THEN NULL ELSE CURRENT_TIMESTAMP END)
@@ -3951,7 +3951,7 @@ def pagina_administrar_usuarios():
                 with engine.connect() as conn:
                     query = text("""
                         SELECT id, username, nombre_completo, role 
-                        FROM oxigeno.usuarios 
+                        FROM public.usuarios 
                         ORDER BY username
                     """)
                     result = conn.execute(query)
@@ -4050,7 +4050,7 @@ def pagina_historial_actividades():
                     st.error("No se pudo conectar a la base de datos")
                     return
                 with engine.connect() as conn:
-                    query = text("SELECT id, username, nombre_completo FROM oxigeno.usuarios ORDER BY username")
+                    query = text("SELECT id, username, nombre_completo FROM public.usuarios ORDER BY username")
                     result = conn.execute(query)
                     usuarios = [{'id': row[0], 'username': row[1], 'nombre': row[2]} for row in result]
                     
@@ -4229,7 +4229,7 @@ def pagina_cambiar_password():
     with engine.connect() as conn:
         query = text("""
             SELECT ultimo_cambio_password 
-            FROM oxigeno.usuarios
+            FROM public.usuarios
             WHERE id = :user_id
         """)
         
@@ -4283,7 +4283,7 @@ def pagina_cambiar_password():
                     with engine.connect() as conn:
                         query = text("""
                             SELECT COUNT(*) 
-                            FROM oxigeno.usuarios
+                            FROM public.usuarios
                             WHERE id = :user_id AND password = :password
                         """)
                         
