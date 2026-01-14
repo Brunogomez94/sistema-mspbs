@@ -69,13 +69,76 @@ INTERVALO_ACTUALIZACION = 10
 # Crear conexión a PostgreSQL (lazy initialization - solo cuando se necesite)
 engine = None
 
-def get_engine():
-    """Obtener o crear el engine de conexión (lazy initialization)"""
-    global engine
+def get_supabase_api_config():
+    """Obtener configuración de Supabase para API REST"""
     try:
-        config = get_db_config_licitaciones()
-        # Supabase requiere SSL - siempre crear nuevo engine para usar la configuración actual
-        conn_str = f"postgresql://{config['user']}:{config['password']}@{config['host']}:{config['port']}/{config['name']}?sslmode=require"
+        if hasattr(st, 'secrets') and 'supabase' in st.secrets:
+            return {
+                'url': st.secrets['supabase']['url'],
+                'key': st.secrets['supabase']['key']
+            }
+    except Exception:
+        pass
+    
+    # Fallback a variables de entorno
+    import os
+    return {
+        'url': os.getenv('SUPABASE_URL', ''),
+        'key': os.getenv('SUPABASE_KEY', '')
+    }
+
+@st.cache_resource
+def get_engine():
+    """
+    Obtener engine de conexión - API REST primero, luego conexión directa
+    
+    Retorna:
+    - Si API REST está disponible: dict con {'type': 'api_rest', 'client': supabase_client}
+    - Si conexión directa funciona: SQLAlchemy engine
+    - Si ambos fallan: None
+    """
+    from urllib.parse import quote_plus
+    
+    config = get_db_config_licitaciones()
+    host = config['host']
+    port = config['port']
+    dbname = config['name']
+    user = config['user']
+    password = config['password']
+    
+    # Asegurar formato correcto de usuario para Supabase
+    if '.supabase.co' in host:
+        instance_id = host.split('.')[1] if host.startswith('db.') else host.split('.')[0]
+        if not user.startswith(f'postgres.{instance_id}'):
+            user = f"postgres.{instance_id}"
+    
+    # INTENTO 1: API REST de Supabase (preferido)
+    api_config = get_supabase_api_config()
+    if api_config['url'] and api_config['key']:
+        try:
+            from supabase import create_client, Client
+            supabase: Client = create_client(api_config['url'], api_config['key'])
+            
+            # Probar conexión
+            try:
+                response = supabase.table('oxigeno.usuarios').select("id").limit(1).execute()
+            except:
+                # Si no existe esa tabla, intentar otra
+                try:
+                    response = supabase.table('_prisma_migrations').select("id").limit(1).execute()
+                except:
+                    pass
+            
+            return {'type': 'api_rest', 'client': supabase, 'config': api_config}
+        except ImportError:
+            pass
+        except Exception:
+            pass
+    
+    # INTENTO 2: Conexión directa
+    try:
+        password_escaped = quote_plus(password)
+        conn_str = f"postgresql://{user}:{password_escaped}@{host}:{port}/{dbname}?sslmode=require"
         engine = create_engine(
             conn_str,
             connect_args={
@@ -85,10 +148,140 @@ def get_engine():
             },
             pool_pre_ping=True
         )
-    except Exception as e:
-        # No fallar si no puede conectar, solo retornar None
-        pass
-    return engine
+        # Probar conexión
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return engine
+    except Exception:
+        return None
+
+def execute_query(query, params=None, fetch_one=False, fetch_all=False):
+    """
+    Ejecutar consulta SQL compatible con API REST y conexión directa
+    
+    Args:
+        query: Query SQL como string
+        params: Diccionario de parámetros (solo para conexión directa)
+        fetch_one: Si True, retorna solo el primer resultado
+        fetch_all: Si True, retorna todos los resultados
+    
+    Returns:
+        Resultado de la consulta según fetch_one/fetch_all
+    """
+    engine = get_engine()
+    
+    if engine is None:
+        st.error("No se pudo conectar a la base de datos")
+        return None
+    
+    # Si es API REST
+    if isinstance(engine, dict) and engine.get('type') == 'api_rest':
+        client = engine['client']
+        
+        # Para API REST, necesitamos convertir SQL a llamadas de API
+        # Por ahora, solo soportamos consultas SELECT simples a tablas específicas
+        # Extraer tabla y condiciones del query
+        query_lower = query.lower().strip()
+        
+        if query_lower.startswith('select'):
+            # Intentar parsear SELECT básico
+            # Ejemplo: SELECT id, username FROM oxigeno.usuarios WHERE cedula = :cedula
+            try:
+                # Extraer nombre de tabla (asumiendo formato: FROM schema.table)
+                if 'from' in query_lower:
+                    parts = query_lower.split('from')
+                    if len(parts) > 1:
+                        table_part = parts[1].split()[0].strip()
+                        # Remover comillas si las hay y manejar esquemas
+                        table_name = table_part.replace('"', '').replace("'", "")
+                        
+                        # En Supabase API REST, los esquemas se manejan como parte del nombre de tabla
+                        # oxigeno.usuarios -> oxigeno_usuarios o simplemente usuarios si está en el esquema público
+                        # Intentar primero con el nombre completo, luego sin esquema
+                        table_names_to_try = [table_name]
+                        if '.' in table_name:
+                            # También intentar sin el esquema (asumiendo que está en public)
+                            table_names_to_try.append(table_name.split('.')[-1])
+                            # Y con guion bajo (algunos sistemas usan esto)
+                            table_names_to_try.append(table_name.replace('.', '_'))
+                        
+                        # Extraer columnas
+                        select_part = parts[0].replace('select', '').strip()
+                        columns = [col.strip().replace('"', '').replace("'", "") for col in select_part.split(',')]
+                        columns_str = ','.join(columns)
+                        
+                        # Aplicar filtros si hay WHERE
+                        filters = {}
+                        if 'where' in query_lower:
+                            where_part = query_lower.split('where')[1].split('limit')[0] if 'limit' in query_lower else query_lower.split('where')[1]
+                            # Parsear condiciones básicas (solo = y AND por ahora)
+                            if '=' in where_part:
+                                conditions = where_part.split('and')
+                                for condition in conditions:
+                                    if '=' in condition:
+                                        parts_cond = condition.split('=')
+                                        if len(parts_cond) == 2:
+                                            col = parts_cond[0].strip().replace('"', '').replace("'", "")
+                                            val = parts_cond[1].strip().replace('"', '').replace("'", "")
+                                            
+                                            # Si val es un parámetro (:param), usar params
+                                            if val.startswith(':'):
+                                                param_name = val[1:]
+                                                if params and param_name in params:
+                                                    val = params[param_name]
+                                                else:
+                                                    continue
+                                            
+                                            filters[col] = val
+                        
+                        # Intentar con cada variante del nombre de tabla
+                        for table_try in table_names_to_try:
+                            try:
+                                supabase_query = client.table(table_try).select(columns_str)
+                                
+                                # Aplicar filtros
+                                for col, val in filters.items():
+                                    supabase_query = supabase_query.eq(col, val)
+                                
+                                # Ejecutar
+                                response = supabase_query.execute()
+                                
+                                if fetch_one:
+                                    return response.data[0] if response.data else None
+                                elif fetch_all:
+                                    return response.data
+                                else:
+                                    return response.data
+                            except Exception as table_error:
+                                # Si esta tabla no funciona, intentar la siguiente
+                                continue
+                        
+                        # Si ninguna tabla funcionó
+                        raise Exception(f"No se pudo acceder a la tabla {table_name}")
+            except Exception as e:
+                st.error(f"Error ejecutando query con API REST: {e}")
+                st.info(f"Query original: {query[:200]}...")
+                return None
+        else:
+            st.warning("API REST solo soporta consultas SELECT. Para INSERT/UPDATE/DELETE usa conexión directa.")
+            return None
+    
+    # Conexión directa
+    from sqlalchemy import text
+    query_obj = text(query)
+    
+    with engine.connect() as conn:
+        if params:
+            result = conn.execute(query_obj, params)
+        else:
+            result = conn.execute(query_obj)
+        
+        if fetch_one:
+            return result.fetchone()
+        elif fetch_all:
+            return result.fetchall()
+        else:
+            return result
 
 def limpiar_dataframe_numerico(df):
     """
@@ -1679,50 +1872,55 @@ def pagina_login():
                 password_hash = hashlib.sha256(password.encode()).hexdigest()
                 
                 try:
-                    engine = get_engine()
-                    if engine is None:
-                        st.error("No se pudo conectar a la base de datos")
-                        return
-                    with engine.connect() as conn:
-                        # Modificar la consulta para usar cédula
-                        query = text("""
-                            SELECT id, username, role, nombre_completo, ultimo_cambio_password 
-                            FROM oxigeno.usuarios 
-                            WHERE cedula = :cedula AND password = :password
-                        """)
+                    # Verificar credenciales usando función compatible con API REST
+                    query = """
+                        SELECT id, username, role, nombre_completo, ultimo_cambio_password 
+                        FROM oxigeno.usuarios 
+                        WHERE cedula = :cedula AND password = :password
+                    """
+                    
+                    user = execute_query(
+                        query, 
+                        params={'cedula': cedula, 'password': password_hash},
+                        fetch_one=True
+                    )
+                    
+                    if user:
+                        # Autenticación exitosa
+                        # Si es dict (API REST), convertir a tupla para compatibilidad
+                        if isinstance(user, dict):
+                            user_tuple = (
+                                user.get('id'),
+                                user.get('username'),
+                                user.get('role'),
+                                user.get('nombre_completo'),
+                                user.get('ultimo_cambio_password')
+                            )
+                            user = user_tuple
                         
-                        result = conn.execute(query, {
-                            'cedula': cedula,  # Usar cédula
-                            'password': password_hash
-                        })
+                        st.session_state.logged_in = True
+                        st.session_state.user_id = user[0]
+                        st.session_state.username = user[1]
+                        st.session_state.user_role = user[2]
+                        st.session_state.user_name = user[3]
                         
-                        user = result.fetchone()
-                        
-                        if user:
-                            # Autenticación exitosa
-                            st.session_state.logged_in = True
-                            st.session_state.user_id = user[0]
-                            st.session_state.username = user[1]
-                            st.session_state.user_role = user[2]
-                            st.session_state.user_name = user[3]
-                            
-                            # Verificar si se requiere cambio de contraseña
-                            if user[4] is None:  # ultimo_cambio_password es NULL
-                                st.session_state.requiere_cambio_password = True
-                                st.warning("Se requiere cambiar su contraseña. Será redirigido para hacerlo.")
-                                time.sleep(2)
-                            else:
-                                st.session_state.requiere_cambio_password = False
-                            
-                            st.success("Inicio de sesión exitoso!")
-                            registrar_actividad(
-                                accion="LOGIN",
-                                modulo="USUARIOS", 
-                                descripcion=f"Usuario {cedula} inició sesión exitosamente")
-                            time.sleep(1)
-                            st.rerun()
+                        # Verificar si se requiere cambio de contraseña
+                        if user[4] is None:  # ultimo_cambio_password es NULL
+                            st.session_state.requiere_cambio_password = True
+                            st.warning("Se requiere cambiar su contraseña. Será redirigido para hacerlo.")
+                            time.sleep(2)
                         else:
-                            st.error("Cédula o contraseña incorrectos.")  # Cambiar mensaje
+                            st.session_state.requiere_cambio_password = False
+                        
+                        st.success("Inicio de sesión exitoso!")
+                        registrar_actividad(
+                            accion="LOGIN",
+                            modulo="USUARIOS", 
+                            descripcion=f"Usuario {cedula} inició sesión exitosamente")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("Cédula o contraseña incorrectos.")
                 except Exception as e:
                     st.error(f"Error al verificar credenciales: {e}")    
     with col2:
