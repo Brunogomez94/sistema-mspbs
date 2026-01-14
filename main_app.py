@@ -104,28 +104,34 @@ def get_db_engine(_host, _port, _dbname, _user, _password):
         # Usar parámetros en la URL para mejor compatibilidad
         conn_str = f"postgresql://{user_para_conexion}:{_password}@{host_para_conexion}:{_port}/{_dbname}?sslmode=require"
         
-        # Configurar connect_args con SSL
-        # psycopg2 manejará automáticamente IPv4 si IPv6 falla
+        # Forzar IPv4 explícitamente resolviendo el hostname
+        # Esto evita el error "Cannot assign requested address" con IPv6
+        ipv4_address = None
+        try:
+            import socket
+            # Obtener solo direcciones IPv4 (AF_INET)
+            addr_info = socket.getaddrinfo(host_para_conexion, _port, socket.AF_INET, socket.SOCK_STREAM)
+            if addr_info:
+                ipv4_address = addr_info[0][4][0]
+                # Usar la IP directamente en lugar del hostname
+                conn_str = f"postgresql://{user_para_conexion}:{_password}@{ipv4_address}:{_port}/{_dbname}?sslmode=require"
+        except Exception as e:
+            # Si falla la resolución, usar el hostname original
+            # pero intentar forzar IPv4 en connect_args
+            pass
+        
+        # Configurar connect_args con SSL y forzar IPv4 si es posible
         connect_args = {
             "client_encoding": "utf8",
             "connect_timeout": 10,
             "sslmode": "require"
         }
         
-        # Intentar forzar IPv4 explícitamente usando socket
-        # Esto ayuda a evitar el error "Cannot assign requested address" con IPv6
-        try:
-            import socket
-            # Obtener solo direcciones IPv4
-            addr_info = socket.getaddrinfo(_host, _port, socket.AF_INET, socket.SOCK_STREAM)
-            if addr_info:
-                ipv4 = addr_info[0][4][0]
-                # Reemplazar hostname con IP en la cadena de conexión
-                conn_str = conn_str.replace(host_para_conexion, ipv4)
-        except Exception:
-            # Si falla la resolución, usar el hostname original
-            # psycopg2 intentará IPv4 automáticamente si IPv6 falla
-            pass
+        # Si tenemos la IP, usar hostaddr para forzar IPv4
+        if ipv4_address:
+            connect_args["hostaddr"] = ipv4_address
+            # No usar hostname si tenemos IP
+            # La cadena de conexión ya tiene la IP
         
         # Crear engine con configuración optimizada
         engine = create_engine(
