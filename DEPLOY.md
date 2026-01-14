@@ -17,7 +17,7 @@ Streamlit Cloud es la forma más fácil y rápida de desplegar aplicaciones Stre
 ### Paso 1: Preparar el Repositorio
 
 1. Asegúrate de que todos los archivos estén en GitHub
-2. Verifica que `packages.txt` existe en la raíz del proyecto
+2. Verifica que `requirements.txt` existe en la raíz del proyecto (contiene las dependencias de Python)
 
 ### Paso 2: Conectar con Streamlit Cloud
 
