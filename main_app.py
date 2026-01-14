@@ -100,41 +100,26 @@ def get_db_engine(_host, _port, _dbname, _user, _password):
             if not user_para_conexion.startswith(f'postgres.{instance_id}'):
                 user_para_conexion = f"postgres.{instance_id}"
         
-        # Construir cadena de conexión con SSL
-        # Usar parámetros en la URL para mejor compatibilidad
-        conn_str = f"postgresql://{user_para_conexion}:{_password}@{host_para_conexion}:{_port}/{_dbname}?sslmode=require"
+        # Usar pg8000 en lugar de psycopg2 para mejor compatibilidad con Supabase
+        # pg8000 es un driver puro de Python que maneja mejor IPv6/IPv4
+        # Cambiar el dialecto de postgresql a postgresql+pg8000
+        from urllib.parse import quote_plus
         
-        # Forzar IPv4 explícitamente resolviendo el hostname
-        # Esto evita el error "Cannot assign requested address" con IPv6
-        ipv4_address = None
-        try:
-            import socket
-            # Obtener solo direcciones IPv4 (AF_INET) - forzar IPv4
-            addr_info = socket.getaddrinfo(host_para_conexion, _port, socket.AF_INET, socket.SOCK_STREAM)
-            if addr_info:
-                ipv4_address = addr_info[0][4][0]
-        except Exception as e:
-            # Si falla la resolución, usar el hostname original
-            pass
+        # Escapar la contraseña para la URL
+        password_escaped = quote_plus(_password)
+        
+        # Construir cadena de conexión usando pg8000
+        # pg8000 usa el formato: postgresql+pg8000://
+        conn_str = f"postgresql+pg8000://{user_para_conexion}:{password_escaped}@{host_para_conexion}:{_port}/{_dbname}"
         
         # Configurar connect_args con SSL
+        # pg8000 maneja SSL de forma diferente
         connect_args = {
-            "client_encoding": "utf8",
-            "connect_timeout": 10,
-            "sslmode": "require"
+            "ssl": True,  # pg8000 usa 'ssl' en lugar de 'sslmode'
+            "timeout": 10
         }
         
-        # Si tenemos IPv4, usar hostaddr para forzar IPv4 y evitar resolución DNS
-        if ipv4_address:
-            # Usar hostaddr en lugar de hostname para evitar resolución DNS a IPv6
-            connect_args["hostaddr"] = ipv4_address
-            # Construir URL con IP directamente
-            conn_str = f"postgresql://{user_para_conexion}:{_password}@{ipv4_address}:{_port}/{_dbname}?sslmode=require"
-        else:
-            # Si no se pudo resolver a IPv4, usar hostname original
-            conn_str = f"postgresql://{user_para_conexion}:{_password}@{host_para_conexion}:{_port}/{_dbname}?sslmode=require"
-        
-        # Crear engine con configuración optimizada
+        # Crear engine con pg8000
         engine = create_engine(
             conn_str, 
             connect_args=connect_args,

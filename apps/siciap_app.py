@@ -248,23 +248,35 @@ class PostgresConnection:
 
     def connect(self):
         try:
-            # Conexión con psycopg2 - Supabase requiere SSL
-            self.conn = psycopg2.connect(
-                host=self.host,
-                port=self.port,
-                dbname=self.dbname,
-                user=self.user,
-                password=self.password,
-                sslmode='require'
-            )
-            self.conn.autocommit = True  # Para crear esquemas
-            
-            # Conexión con SQLAlchemy para pandas to_sql - Supabase requiere SSL
-            connection_string = f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.dbname}?sslmode=require"
-            self.engine = create_engine(
-                connection_string,
-                connect_args={"sslmode": "require"}
-            )
+            if USE_PG8000:
+                # Usar pg8000 - mejor compatibilidad con Supabase
+                from urllib.parse import quote_plus
+                password_escaped = quote_plus(self.password)
+                connection_string = f"postgresql+pg8000://{self.user}:{password_escaped}@{self.host}:{self.port}/{self.dbname}"
+                self.engine = create_engine(
+                    connection_string,
+                    connect_args={"ssl": True, "timeout": 10}
+                )
+                # Para pg8000, usar el engine directamente
+                self.conn = self.engine.connect()
+            else:
+                # Fallback a psycopg2
+                self.conn = psycopg2.connect(
+                    host=self.host,
+                    port=self.port,
+                    dbname=self.dbname,
+                    user=self.user,
+                    password=self.password,
+                    sslmode='require'
+                )
+                self.conn.autocommit = True
+                
+                # Conexión con SQLAlchemy para pandas to_sql
+                connection_string = f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.dbname}?sslmode=require"
+                self.engine = create_engine(
+                    connection_string,
+                    connect_args={"sslmode": "require"}
+                )
             
             logger.info("Conexión a PostgreSQL establecida correctamente")
             return True
@@ -295,18 +307,33 @@ class PostgresConnection:
         """Devuelve un cursor de la conexión actual"""
         if self.conn is None:
             self.connect()
+        if USE_PG8000:
+            # pg8000 usa el engine directamente, no necesita cursor tradicional
+            return self.engine
         return self.conn.cursor()
 
     def execute_sql(self, sql_query, params=None):
         """Ejecuta una consulta SQL directamente"""
         if self.conn is None:
             self.connect()
-        with self.conn.cursor() as cursor:
-            if params:
-                cursor.execute(sql_query, params)
-            else:
-                cursor.execute(sql_query)
-            self.conn.commit()
+        if USE_PG8000:
+            # pg8000 usa SQLAlchemy engine
+            from sqlalchemy import text
+            with self.engine.connect() as conn:
+                if params:
+                    conn.execute(text(sql_query), params)
+                else:
+                    conn.execute(text(sql_query))
+                conn.commit()
+            return True
+        else:
+            # psycopg2
+            with self.conn.cursor() as cursor:
+                if params:
+                    cursor.execute(sql_query, params)
+                else:
+                    cursor.execute(sql_query)
+                self.conn.commit()
             return True
 
 # Funciones generales para limpiar y normalizar datos
