@@ -157,6 +157,67 @@ def get_engine():
     except Exception:
         return None
 
+def get_direct_connection():
+    """
+    Obtener conexión directa a PostgreSQL
+    Si estamos usando API REST, intenta crear una conexión directa como fallback
+    Retorna: SQLAlchemy engine o None si falla
+    """
+    from urllib.parse import quote_plus
+    
+    config = get_db_config_licitaciones()
+    host = config['host']
+    port = config['port']
+    dbname = config['name']
+    user = config['user']
+    password = config['password']
+    
+    # Asegurar formato correcto de usuario para Supabase
+    if '.supabase.co' in host:
+        instance_id = host.split('.')[1] if host.startswith('db.') else host.split('.')[0]
+        if not user.startswith(f'postgres.{instance_id}'):
+            user = f"postgres.{instance_id}"
+    
+    try:
+        password_escaped = quote_plus(password)
+        conn_str = f"postgresql://{user}:{password_escaped}@{host}:{port}/{dbname}?sslmode=require"
+        engine = create_engine(
+            conn_str,
+            connect_args={
+                "client_encoding": "utf8",
+                "connect_timeout": 10,
+                "sslmode": "require"
+            },
+            pool_pre_ping=True
+        )
+        # Probar conexión
+        with engine.connect() as test_conn:
+            test_conn.execute(text("SELECT 1"))
+        return engine
+    except Exception:
+        return None
+
+def safe_get_engine():
+    """
+    Obtener engine seguro: si es API REST, intenta conexión directa como fallback
+    Retorna: SQLAlchemy engine (nunca dict de API REST)
+    """
+    engine = get_engine()
+    
+    if engine is None:
+        return None
+    
+    # Si es API REST, intentar conexión directa
+    if isinstance(engine, dict) and engine.get('type') == 'api_rest':
+        direct_engine = get_direct_connection()
+        if direct_engine:
+            return direct_engine
+        # Si falla conexión directa, retornar None
+        return None
+    
+    # Si ya es conexión directa, retornarla
+    return engine
+
 def execute_query(query, params=None, fetch_one=False, fetch_all=False):
     """
     Ejecutar consulta SQL compatible con API REST y conexión directa
@@ -2174,10 +2235,10 @@ def pagina_login():
 
 def obtener_proveedores():
     try:
-        engine = get_engine()
+        engine = safe_get_engine()
         if engine is None:
             st.error("No se pudo conectar a la base de datos")
-            return
+            return []
         with engine.connect() as conn:
             query = text("""
                 SELECT razon_social, ruc 
@@ -2484,7 +2545,7 @@ def pagina_cargar_archivo():
         if id_busqueda:
             # Buscar en la base de datos si existe una licitación con ese ID
             try:
-                engine = get_engine()
+                engine = safe_get_engine()
                 if engine is None:
                     st.error("No se pudo conectar a la base de datos")
                     return
@@ -2954,7 +3015,7 @@ def pagina_cargar_archivo():
             try:
                 esquema_formateado = esquema.strip().lower().replace(' ', '_').replace('-', '_')
                 
-                engine = get_engine()
+                engine = safe_get_engine()
                 if engine is None:
                     st.error("No se pudo conectar a la base de datos")
                     return
@@ -3169,7 +3230,7 @@ def pagina_gestionar_proveedores():
         
         # Obtener proveedores con filtros
         try:
-            engine = get_engine()
+            engine = safe_get_engine()
             if engine is None:
                 st.error("No se pudo conectar a la base de datos")
                 return
@@ -3290,7 +3351,7 @@ def pagina_gestionar_proveedores():
                                 # Procesar actualización
                                 if actualizar:
                                     try:
-                                        engine = get_engine()
+                                        engine = safe_get_engine()
                                         if engine is None:
                                             st.error("No se pudo conectar a la base de datos")
                                             return
@@ -3349,7 +3410,7 @@ def pagina_gestionar_proveedores():
                                         estado_texto = "activo" if nuevo_estado else "inactivo"
                                         
                                         with st.spinner(f"Cambiando estado a {estado_texto}... Por favor espere"):
-                                            engine = get_engine()
+                                            engine = safe_get_engine()
                                             if engine is None:
                                                 st.error("No se pudo conectar a la base de datos")
                                                 return
@@ -3394,7 +3455,7 @@ def pagina_gestionar_proveedores():
                                         process_placeholder = st.empty()
                                         process_placeholder.warning("⏳ OPERACIÓN EN PROGRESO - NO INTERRUMPA")
                                         
-                                        engine = get_engine()
+                                        engine = safe_get_engine()
                                         if engine is None:
                                             st.error("No se pudo conectar a la base de datos")
                                             return
@@ -3485,7 +3546,7 @@ def pagina_gestionar_proveedores():
                 else:
                     try:
                         # Verificar si el RUC ya existe
-                        engine = get_engine()
+                        engine = safe_get_engine()
                         if engine is None:
                             st.error("No se pudo conectar a la base de datos")
                             return
@@ -3718,7 +3779,7 @@ def pagina_gestionar_proveedores():
                                         errores_detalle.append(f"Fila {index + 1}: RUC o Razón Social vacíos")
                                         continue
                                     
-                                    engine = get_engine()
+                                    engine = safe_get_engine()
                                     if engine is None:
                                         st.error("No se pudo conectar a la base de datos")
                                         return
@@ -3793,7 +3854,7 @@ def eliminar_proveedor_bulk():
     st.warning("⚠️ **FUNCIÓN ADMINISTRATIVA** - Use con extrema precaución")
     
     try:
-        engine = get_engine()
+        engine = safe_get_engine()
         if engine is None:
             st.error("No se pudo conectar a la base de datos")
             return
@@ -3883,7 +3944,7 @@ def pagina_administrar_usuarios():
         
         # Obtener usuarios
         try:
-            engine = get_engine()
+            engine = safe_get_engine()
             if engine is None:
                 st.error("No se pudo conectar a la base de datos")
                 return
