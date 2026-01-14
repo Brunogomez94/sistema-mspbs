@@ -111,20 +111,24 @@ def get_db_engine(_host, _port, _dbname, _user, _password):
         # Construir cadena de conexión con SSL
         conn_str = f"postgresql://{user_para_conexion}:{_password}@{host_para_conexion}:{_port}/{_dbname}?sslmode=require"
         
-        # Configurar connect_args con SSL
+        # Configurar connect_args con SSL y opciones para evitar IPv6
         connect_args = {
             "client_encoding": "utf8",
             "connect_timeout": 10,
-            "sslmode": "require"
+            "sslmode": "require",
+            # Forzar uso de IPv4 si es posible
+            "options": "-c search_path=public"
         }
         
+        # Crear engine con configuración optimizada
         engine = create_engine(
             conn_str, 
             connect_args=connect_args,
             pool_pre_ping=True,
-            # Configuración adicional para mejorar la conexión
-            pool_size=5,
-            max_overflow=10
+            pool_size=3,
+            max_overflow=5,
+            # Reducir timeout para fallar rápido si hay problemas
+            pool_recycle=3600
         )
         return engine
     except Exception as e:
