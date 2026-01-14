@@ -72,13 +72,20 @@ engine = None
 def get_engine():
     """Obtener o crear el engine de conexión (lazy initialization)"""
     global engine
-    if engine is None:
-        try:
-            config = get_db_config_licitaciones()
-            engine = create_engine(f"postgresql://{config['user']}:{config['password']}@{config['host']}:{config['port']}/{config['name']}")
-        except Exception as e:
-            # No fallar si no puede conectar, solo retornar None
-            pass
+    try:
+        config = get_db_config_licitaciones()
+        # Siempre crear nuevo engine para usar la configuración actual
+        engine = create_engine(
+            f"postgresql://{config['user']}:{config['password']}@{config['host']}:{config['port']}/{config['name']}",
+            connect_args={
+                "client_encoding": "utf8",
+                "connect_timeout": 10
+            },
+            pool_pre_ping=True
+        )
+    except Exception as e:
+        # No fallar si no puede conectar, solo retornar None
+        pass
     return engine
 
 def limpiar_dataframe_numerico(df):

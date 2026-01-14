@@ -101,11 +101,18 @@ def get_db_config_dashboard():
     }
 
 @st.cache_resource
-def get_engine():
+def get_engine(_host, _port, _database, _user, _password):
+    """Crear engine con cache que se invalida cuando cambian los secrets"""
     try:
-        config = get_db_config_dashboard()
-        conn_str = f"postgresql://{config['user']}:{config['password']}@{config['host']}:{config['port']}/{config['database']}"
-        engine = create_engine(conn_str, connect_args={"client_encoding": "utf8"})
+        conn_str = f"postgresql://{_user}:{_password}@{_host}:{_port}/{_database}"
+        engine = create_engine(
+            conn_str, 
+            connect_args={
+                "client_encoding": "utf8",
+                "connect_timeout": 10
+            },
+            pool_pre_ping=True
+        )
         return engine
     except Exception as e:
         st.error(f"Error conexión PostgreSQL: {e}")
@@ -113,7 +120,14 @@ def get_engine():
 
 @st.cache_data(ttl=30)  # Cache por 30 segundos para refresh automático
 def load_covid_data():
-    engine = get_engine()
+    config = get_db_config_dashboard()
+    engine = get_engine(
+        _host=config['host'],
+        _port=config['port'],
+        _database=config['database'],
+        _user=config['user'],
+        _password=config['password']
+    )
     if not engine:
         return pd.DataFrame()
 

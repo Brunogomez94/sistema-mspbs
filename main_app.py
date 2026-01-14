@@ -78,7 +78,15 @@ def get_db_engine(_host, _port, _dbname, _user, _password):
             st.warning(f"⚠️ ADVERTENCIA: Se está usando 'localhost' en lugar del host de Supabase. Verifica los secrets.")
         
         conn_str = f"postgresql://{_user}:{_password}@{_host}:{_port}/{_dbname}"
-        engine = create_engine(conn_str, connect_args={"client_encoding": "utf8"})
+        # Forzar IPv4 y agregar timeout
+        engine = create_engine(
+            conn_str, 
+            connect_args={
+                "client_encoding": "utf8",
+                "connect_timeout": 10
+            },
+            pool_pre_ping=True  # Verificar conexión antes de usar
+        )
         return engine
     except Exception as e:
         st.error(f"Error creando engine: {e}")
