@@ -1085,9 +1085,13 @@ def configurar_tabla_auditoria():
        engine = get_engine()
        if engine is None:
            return
+       # Si es API REST, solo verificar que existe (las tablas ya están creadas)
        if isinstance(engine, dict) and engine.get('type') == 'api_rest':
-           # Para API REST, las tablas se crean manualmente en Supabase
-           st.info("Para crear la tabla de auditoría en Supabase, ejecuta el SQL en el SQL Editor.")
+           # Las tablas ya están creadas en Supabase, no hacer nada
+           return
+       # Usar conexión directa para crear tabla si no existe
+       engine = safe_get_engine()
+       if engine is None:
            return
        with engine.connect() as conn:
            conn.execute(text("""
@@ -1181,6 +1185,11 @@ def obtener_historial_actividades(limite=100, usuario_id=None, modulo=None, acci
         # Para API REST, la auditoría se puede implementar más adelante
         if isinstance(engine, dict) and engine.get('type') == 'api_rest':
             # Por ahora, retornar lista vacía
+            return []
+        
+        # Usar conexión directa para auditoría
+        engine = safe_get_engine()
+        if engine is None:
             return []
         
         with engine.connect() as conn:
@@ -1292,6 +1301,11 @@ def obtener_esquemas_postgres():
         # Para API REST, no podemos obtener esquemas directamente
         if isinstance(engine, dict) and engine.get('type') == 'api_rest':
             # Retornar lista vacía o esquemas conocidos
+            return []
+        
+        # Usar conexión directa para obtener esquemas
+        engine = safe_get_engine()
+        if engine is None:
             return []
         
         with engine.connect() as conn:
