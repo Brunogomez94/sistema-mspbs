@@ -826,8 +826,10 @@ def configurar_tabla_cargas():
     try:
         engine = get_engine()
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
-            return
+            return False
+        if isinstance(engine, dict) and engine.get('type') == 'api_rest':
+            # Para API REST, las tablas se crean manualmente en Supabase
+            return True
         with engine.connect() as conn:
             # Crear esquema si no existe
             conn.execute(text("""
@@ -858,8 +860,10 @@ def configurar_tabla_ordenes_compra():
     try:
         engine = get_engine()
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
-            return
+            return False
+        if isinstance(engine, dict) and engine.get('type') == 'api_rest':
+            # Para API REST, las tablas se crean manualmente en Supabase
+            return True
         with engine.connect() as conn:
             # Crear esquema si no existe
             conn.execute(text("""
@@ -984,8 +988,10 @@ def configurar_tabla_proveedores():
     try:
         engine = get_engine()
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
-            return
+            return False
+        if isinstance(engine, dict) and engine.get('type') == 'api_rest':
+            # Para API REST, las tablas se crean manualmente en Supabase
+            return True
         with engine.connect() as conn:
             conn.execute(text("""
                 CREATE SCHEMA IF NOT EXISTS oxigeno;
@@ -1015,6 +1021,13 @@ def configurar_tabla_proveedores():
 def configurar_tabla_auditoria():
    """Crea la tabla de auditoría para registrar todas las actividades del sistema"""
    try:
+       engine = get_engine()
+       if engine is None:
+           return
+       if isinstance(engine, dict) and engine.get('type') == 'api_rest':
+           # Para API REST, las tablas se crean manualmente en Supabase
+           st.info("Para crear la tabla de auditoría en Supabase, ejecuta el SQL en el SQL Editor.")
+           return
        with engine.connect() as conn:
            conn.execute(text("""
                CREATE SCHEMA IF NOT EXISTS oxigeno;
@@ -1058,6 +1071,16 @@ def registrar_actividad(accion, modulo, descripcion, detalles=None, esquema_afec
    try:
        if 'user_id' not in st.session_state or 'user_name' not in st.session_state:
            return False
+       
+       engine = get_engine()
+       if engine is None:
+           return False
+       
+       # Para API REST, la auditoría se puede implementar más adelante
+       if isinstance(engine, dict) and engine.get('type') == 'api_rest':
+           # Por ahora, solo registrar en logs
+           print(f"Auditoría (API REST): {accion} - {modulo} - {descripcion}")
+           return True
            
        with engine.connect() as conn:
            query = text("""
@@ -1092,7 +1115,13 @@ def obtener_historial_actividades(limite=100, usuario_id=None, modulo=None, acci
         engine = get_engine()
         if engine is None:
             st.error("No se pudo conectar a la base de datos")
-            return
+            return []
+        
+        # Para API REST, la auditoría se puede implementar más adelante
+        if isinstance(engine, dict) and engine.get('type') == 'api_rest':
+            # Por ahora, retornar lista vacía
+            return []
+        
         with engine.connect() as conn:
             query_base = """
                 SELECT a.id, a.usuario_nombre, a.accion, a.modulo, a.descripcion, 
@@ -8452,8 +8481,10 @@ def crear_tabla_usuario_servicio():
     try:
         engine = get_engine()
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
-            return
+            return False
+        if isinstance(engine, dict) and engine.get('type') == 'api_rest':
+            # Para API REST, las tablas se crean manualmente en Supabase
+            return True
         with engine.connect() as conn:
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS oxigeno.usuario_servicio (
