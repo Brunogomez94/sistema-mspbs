@@ -84,14 +84,17 @@ def verificar_conexion_db():
             from sqlalchemy import text
             with engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
-            return True
-        return False
-    except Exception:
-        return False
+            return True, None
+        return False, "No se pudo crear el engine"
+    except Exception as e:
+        return False, str(e)
 
 def main():
     # Verificar conexión a la base de datos
-    db_connected = verificar_conexion_db()
+    db_connected, error_msg = verificar_conexion_db()
+    
+    # Obtener configuración para mostrar info de debug
+    config = get_db_config()
     
     # Indicador de estado
     if db_connected:
@@ -100,6 +103,48 @@ def main():
     else:
         st.markdown('<div class="status-indicator">🔴 BD Desconectada</div>', unsafe_allow_html=True)
         st.sidebar.warning("⚠️ Base de datos no disponible (configura en Secrets)")
+        
+        # Mostrar información de debug en modo expandible
+        with st.sidebar.expander("🔍 Información de Debug", expanded=True):
+            st.write("**Configuración actual:**")
+            st.write(f"Host: `{config['host']}`")
+            st.write(f"Puerto: `{config['port']}`")
+            st.write(f"Base de datos: `{config['dbname']}`")
+            st.write(f"Usuario: `{config['user']}`")
+            st.write(f"Password: `{'*' * len(config['password'])}`")
+            
+            # Verificar si está usando secrets
+            st.write("---")
+            try:
+                if hasattr(st, 'secrets'):
+                    if 'db_config' in st.secrets:
+                        st.success("✅ Secrets detectados en st.secrets")
+                        try:
+                            secrets_config = st.secrets['db_config']
+                            st.write("**Valores en secrets:**")
+                            st.write(f"Host: `{secrets_config.get('host', 'NO ENCONTRADO')}`")
+                            st.write(f"Port: `{secrets_config.get('port', 'NO ENCONTRADO')}`")
+                            st.write(f"DB Name: `{secrets_config.get('dbname', 'NO ENCONTRADO')}`")
+                            st.write(f"User: `{secrets_config.get('user', 'NO ENCONTRADO')}`")
+                        except Exception as e:
+                            st.error(f"Error leyendo secrets: {e}")
+                    else:
+                        st.error("❌ No se encontró 'db_config' en st.secrets")
+                        st.write("**Secrets disponibles:**")
+                        try:
+                            st.json(list(st.secrets.keys()))
+                        except:
+                            st.write("No se pudieron listar los secrets")
+                else:
+                    st.error("❌ st.secrets no está disponible")
+            except Exception as e:
+                st.error(f"Error verificando secrets: {e}")
+            
+            # Mostrar error de conexión si existe
+            if error_msg:
+                st.write("---")
+                st.error(f"**Error de conexión:**")
+                st.code(error_msg)
     
     # Título principal
     st.markdown('<h1 class="main-header">🏥 Sistema Integrado de Gestión - MSPBS</h1>', unsafe_allow_html=True)
