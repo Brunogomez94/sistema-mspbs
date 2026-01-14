@@ -1299,10 +1299,41 @@ def cargar_archivo_con_configuracion(archivo_excel, nombre_archivo, esquema, con
             st.error("No se pudo conectar a la base de datos")
             return False, "No se pudo conectar a la base de datos"
         
-        # Para API REST, las operaciones de carga de archivos requieren conexión directa
+        # Si es API REST, intentar obtener conexión directa como fallback
         if isinstance(engine, dict) and engine.get('type') == 'api_rest':
-            st.error("La carga de archivos Excel requiere conexión directa a PostgreSQL. La API REST no soporta esta operación.")
-            return False, "API REST no soporta carga de archivos Excel"
+            # Intentar conexión directa para operaciones complejas
+            from urllib.parse import quote_plus
+            config = get_db_config_licitaciones()
+            host = config['host']
+            port = config['port']
+            dbname = config['name']
+            user = config['user']
+            password = config['password']
+            
+            # Asegurar formato correcto de usuario para Supabase
+            if '.supabase.co' in host:
+                instance_id = host.split('.')[1] if host.startswith('db.') else host.split('.')[0]
+                if not user.startswith(f'postgres.{instance_id}'):
+                    user = f"postgres.{instance_id}"
+            
+            try:
+                password_escaped = quote_plus(password)
+                conn_str = f"postgresql://{user}:{password_escaped}@{host}:{port}/{dbname}?sslmode=require"
+                engine = create_engine(
+                    conn_str,
+                    connect_args={
+                        "client_encoding": "utf8",
+                        "connect_timeout": 10,
+                        "sslmode": "require"
+                    },
+                    pool_pre_ping=True
+                )
+                # Probar conexión
+                with engine.connect() as test_conn:
+                    test_conn.execute(text("SELECT 1"))
+            except Exception as e:
+                st.error(f"La carga de archivos Excel requiere conexión directa. Error: {e}")
+                return False, f"No se pudo establecer conexión directa: {e}"
         
         with engine.connect() as conn:
             # Iniciar transacción
