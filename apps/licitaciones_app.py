@@ -119,22 +119,27 @@ def get_engine():
             from supabase import create_client, Client
             supabase: Client = create_client(api_config['url'], api_config['key'])
             
-            # Probar conexión
+            # Probar conexión - si falla, no es crítico, seguimos intentando
             try:
                 # Intentar con 'usuarios' (en public) primero, luego otras opciones
                 for table_name in ['usuarios', 'oxigeno_usuarios', 'oxigeno.usuarios']:
                     try:
                         response = supabase.table(table_name).select("id").limit(1).execute()
-                        break
-                    except:
+                        # Si funciona, retornar API REST
+                        return {'type': 'api_rest', 'client': supabase, 'config': api_config}
+                    except Exception as e:
+                        # Continuar con siguiente tabla
                         continue
-            except:
-                pass
-            
-            return {'type': 'api_rest', 'client': supabase, 'config': api_config}
+                # Si ninguna tabla funcionó, aún así retornar API REST (puede que la tabla no exista aún)
+                return {'type': 'api_rest', 'client': supabase, 'config': api_config}
+            except Exception as e:
+                # Si hay error en la prueba, aún así retornar API REST
+                return {'type': 'api_rest', 'client': supabase, 'config': api_config}
         except ImportError:
+            # Si no está instalado supabase, continuar con conexión directa
             pass
-        except Exception:
+        except Exception as e:
+            # Si hay error, continuar con conexión directa
             pass
     
     # INTENTO 2: Conexión directa
