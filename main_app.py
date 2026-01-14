@@ -107,33 +107,85 @@ def get_db_engine(_host, _port, _dbname, _user, _password):
     # Escapar la contraseña para la URL
     password_escaped = quote_plus(_password)
     
-    # Lista de drivers a probar en orden de preferencia
-    drivers_to_try = [
-        {
-            'name': 'psycopg (psycopg3)',
-            'dialect': 'postgresql+psycopg',
-            'connect_args': {
-                'sslmode': 'require',
-                'connect_timeout': 10
+    # Intentar primero con pooler de Supabase (Supavisor) - mejor para conexiones remotas
+    # El pooler evita problemas de IPv6 y timeouts
+    pooler_host = None
+    if '.supabase.co' in _host and 'pooler' not in _host:
+        # Extraer instance_id
+        instance_id = _host.split('.')[1] if _host.startswith('db.') else _host.split('.')[0]
+        # Probar diferentes regiones comunes de Supabase
+        regions = ['us-east-1', 'us-west-1', 'eu-west-1', 'ap-southeast-1']
+        for region in regions:
+            pooler_host = f"aws-0-{region}.pooler.supabase.com"
+            # Probar con este pooler
+            break  # Por ahora probar solo la primera región
+    
+    # Lista de conexiones a probar en orden de preferencia
+    connections_to_try = []
+    
+    # 1. Intentar pooler si está disponible
+    if pooler_host:
+        connections_to_try.extend([
+            {
+                'name': 'psycopg2 + Pooler',
+                'host': pooler_host,
+                'dialect': 'postgresql',
+                'connect_args': {
+                    'sslmode': 'require',
+                    'connect_timeout': 15
+                }
+            },
+            {
+                'name': 'psycopg + Pooler',
+                'host': pooler_host,
+                'dialect': 'postgresql+psycopg',
+                'connect_args': {
+                    'sslmode': 'require',
+                    'connect_timeout': 15
+                }
             }
-        },
+        ])
+    
+    # 2. Intentar conexión directa con diferentes drivers
+    connections_to_try.extend([
         {
-            'name': 'psycopg2',
+            'name': 'psycopg2 + Direct',
+            'host': host_para_conexion,
             'dialect': 'postgresql',
             'connect_args': {
                 'sslmode': 'require',
-                'connect_timeout': 10
+                'connect_timeout': 15
             }
         },
         {
-            'name': 'pg8000',
+            'name': 'psycopg + Direct',
+            'host': host_para_conexion,
+            'dialect': 'postgresql+psycopg',
+            'connect_args': {
+                'sslmode': 'require',
+                'connect_timeout': 15
+            }
+        },
+        {
+            'name': 'pg8000 + Direct',
+            'host': host_para_conexion,
             'dialect': 'postgresql+pg8000',
             'connect_args': {
                 'ssl_context': ssl.create_default_context(),
-                'timeout': 10
+                'timeout': 15
             }
         }
-    ]
+    ])
+    
+    # Convertir a formato antiguo para compatibilidad
+    drivers_to_try = []
+    for conn in connections_to_try:
+        drivers_to_try.append({
+            'name': conn['name'],
+            'dialect': conn['dialect'],
+            'host': conn['host'],
+            'connect_args': conn['connect_args']
+        })
     
     # Intentar cada driver hasta que uno funcione
     last_error = None
