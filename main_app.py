@@ -87,38 +87,45 @@ def get_db_engine(_host, _port, _dbname, _user, _password):
         if _host == 'localhost':
             st.warning(f"⚠️ ADVERTENCIA: Se está usando 'localhost' en lugar del host de Supabase. Verifica los secrets.")
         
-        # Supabase: Usar pooler (Supavisor) en lugar de conexión directa para evitar problemas IPv6
-        # El pooler está en: aws-0-[region].pooler.supabase.com
-        # Si el host es db.xxx.supabase.co, convertir a pooler
+        # Supabase: Usar conexión directa (db.xxx.supabase.co)
+        # El pooler requiere configuración específica de región y puede fallar
+        # Mejor usar conexión directa con mejor manejo de IPv6/IPv4
         host_para_conexion = _host
         user_para_conexion = _user
         
-        # Si es conexión directa de Supabase, intentar usar pooler
-        if '.supabase.co' in _host and 'pooler' not in _host:
-            # Extraer instance_id y región del host
-            # db.otblgsembluynkoalivq.supabase.co -> instance_id = otblgsembluynkoalivq
+        # Asegurar que el usuario tenga el formato correcto para Supabase
+        if '.supabase.co' in _host:
             instance_id = _host.split('.')[1] if _host.startswith('db.') else _host.split('.')[0]
-            
-            # Intentar usar pooler (mejor para IPv4)
-            # Formato: aws-0-[region].pooler.supabase.com
-            # Por defecto usamos us-east-1, pero puede variar
-            # Si falla, psycopg2 intentará la conexión directa
-            host_para_conexion = f"aws-0-us-east-1.pooler.supabase.com"
-            # El usuario en pooler debe ser: postgres.INSTANCE_ID
-            if not user_para_conexion.startswith('postgres.'):
+            # El usuario debe ser: postgres.INSTANCE_ID
+            if not user_para_conexion.startswith(f'postgres.{instance_id}'):
                 user_para_conexion = f"postgres.{instance_id}"
         
         # Construir cadena de conexión con SSL
+        # Usar parámetros en la URL para mejor compatibilidad
         conn_str = f"postgresql://{user_para_conexion}:{_password}@{host_para_conexion}:{_port}/{_dbname}?sslmode=require"
         
-        # Configurar connect_args con SSL y opciones para evitar IPv6
+        # Configurar connect_args con SSL
+        # psycopg2 manejará automáticamente IPv4 si IPv6 falla
         connect_args = {
             "client_encoding": "utf8",
             "connect_timeout": 10,
-            "sslmode": "require",
-            # Forzar uso de IPv4 si es posible
-            "options": "-c search_path=public"
+            "sslmode": "require"
         }
+        
+        # Intentar forzar IPv4 explícitamente usando socket
+        # Esto ayuda a evitar el error "Cannot assign requested address" con IPv6
+        try:
+            import socket
+            # Obtener solo direcciones IPv4
+            addr_info = socket.getaddrinfo(_host, _port, socket.AF_INET, socket.SOCK_STREAM)
+            if addr_info:
+                ipv4 = addr_info[0][4][0]
+                # Reemplazar hostname con IP en la cadena de conexión
+                conn_str = conn_str.replace(host_para_conexion, ipv4)
+        except Exception:
+            # Si falla la resolución, usar el hostname original
+            # psycopg2 intentará IPv4 automáticamente si IPv6 falla
+            pass
         
         # Crear engine con configuración optimizada
         engine = create_engine(
@@ -127,7 +134,6 @@ def get_db_engine(_host, _port, _dbname, _user, _password):
             pool_pre_ping=True,
             pool_size=3,
             max_overflow=5,
-            # Reducir timeout para fallar rápido si hay problemas
             pool_recycle=3600
         )
         return engine
