@@ -104,6 +104,7 @@ def get_db_engine(_host, _port, _dbname, _user, _password):
         # pg8000 es un driver puro de Python que maneja mejor IPv6/IPv4
         # Cambiar el dialecto de postgresql a postgresql+pg8000
         from urllib.parse import quote_plus
+        import ssl
         
         # Escapar la contraseña para la URL
         password_escaped = quote_plus(_password)
@@ -112,10 +113,14 @@ def get_db_engine(_host, _port, _dbname, _user, _password):
         # pg8000 usa el formato: postgresql+pg8000://
         conn_str = f"postgresql+pg8000://{user_para_conexion}:{password_escaped}@{host_para_conexion}:{_port}/{_dbname}"
         
-        # Configurar connect_args con SSL
-        # pg8000 maneja SSL de forma diferente
+        # Configurar connect_args con SSL para pg8000
+        # pg8000 requiere ssl_context en lugar de ssl
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        
         connect_args = {
-            "ssl": True,  # pg8000 usa 'ssl' en lugar de 'sslmode'
+            "ssl_context": ssl_context,
             "timeout": 10
         }
         

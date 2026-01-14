@@ -260,11 +260,16 @@ class PostgresConnection:
             if USE_PG8000:
                 # Usar pg8000 - mejor compatibilidad con Supabase
                 from urllib.parse import quote_plus
+                import ssl
                 password_escaped = quote_plus(self.password)
                 connection_string = f"postgresql+pg8000://{self.user}:{password_escaped}@{self.host}:{self.port}/{self.dbname}"
+                # Configurar SSL context para pg8000
+                ssl_context = ssl.create_default_context()
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
                 self.engine = create_engine(
                     connection_string,
-                    connect_args={"ssl": True, "timeout": 10}
+                    connect_args={"ssl_context": ssl_context, "timeout": 10}
                 )
                 # Para pg8000, usar el engine directamente
                 self.conn = self.engine.connect()
