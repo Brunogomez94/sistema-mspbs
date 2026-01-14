@@ -184,163 +184,6 @@ def get_db_engine(_host, _port, _dbname, _user, _password):
             Obtén estas credenciales en: Supabase → Settings → API
             """)
             return None
-    
-    # Intentar primero con pooler de Supabase (Supavisor) - mejor para conexiones remotas
-    # El pooler evita problemas de IPv6 y timeouts
-    pooler_host = None
-    if '.supabase.co' in _host and 'pooler' not in _host:
-        # Extraer instance_id
-        instance_id = _host.split('.')[1] if _host.startswith('db.') else _host.split('.')[0]
-        # Probar diferentes regiones comunes de Supabase
-        regions = ['us-east-1', 'us-west-1', 'eu-west-1', 'ap-southeast-1']
-        for region in regions:
-            pooler_host = f"aws-0-{region}.pooler.supabase.com"
-            # Probar con este pooler
-            break  # Por ahora probar solo la primera región
-    
-    # Lista de conexiones a probar en orden de preferencia
-    connections_to_try = []
-    
-    # 1. Intentar pooler si está disponible
-    if pooler_host:
-        connections_to_try.extend([
-            {
-                'name': 'psycopg2 + Pooler',
-                'host': pooler_host,
-                'dialect': 'postgresql',
-                'connect_args': {
-                    'sslmode': 'require',
-                    'connect_timeout': 15
-                }
-            },
-            {
-                'name': 'psycopg + Pooler',
-                'host': pooler_host,
-                'dialect': 'postgresql+psycopg',
-                'connect_args': {
-                    'sslmode': 'require',
-                    'connect_timeout': 15
-                }
-            }
-        ])
-    
-    # 2. Intentar conexión directa con diferentes drivers
-    connections_to_try.extend([
-        {
-            'name': 'psycopg2 + Direct',
-            'host': host_para_conexion,
-            'dialect': 'postgresql',
-            'connect_args': {
-                'sslmode': 'require',
-                'connect_timeout': 15
-            }
-        },
-        {
-            'name': 'psycopg + Direct',
-            'host': host_para_conexion,
-            'dialect': 'postgresql+psycopg',
-            'connect_args': {
-                'sslmode': 'require',
-                'connect_timeout': 15
-            }
-        },
-        {
-            'name': 'pg8000 + Direct',
-            'host': host_para_conexion,
-            'dialect': 'postgresql+pg8000',
-            'connect_args': {
-                'ssl_context': ssl.create_default_context(),
-                'timeout': 15
-            }
-        }
-    ])
-    
-    # Convertir a formato antiguo para compatibilidad
-    drivers_to_try = []
-    for conn in connections_to_try:
-        drivers_to_try.append({
-            'name': conn['name'],
-            'dialect': conn['dialect'],
-            'host': conn['host'],
-            'connect_args': conn['connect_args']
-        })
-    
-    # Intentar cada driver hasta que uno funcione
-    last_error = None
-    for driver in drivers_to_try:
-        try:
-            from sqlalchemy import create_engine
-            
-            # Construir cadena de conexión
-            conn_str = f"{driver['dialect']}://{user_para_conexion}:{password_escaped}@{host_para_conexion}:{_port}/{_dbname}"
-            
-            # Crear engine con el driver actual
-            engine = create_engine(
-                conn_str,
-                connect_args=driver['connect_args'],
-                pool_pre_ping=True,
-                pool_size=3,
-                max_overflow=5,
-                pool_recycle=3600
-            )
-            
-            # Probar la conexión
-            with engine.connect() as conn:
-                from sqlalchemy import text
-                conn.execute(text("SELECT 1"))
-            
-            # Si llegamos aquí, la conexión funcionó
-            st.sidebar.success(f"✅ Conectado usando: {driver['name']}")
-            return engine
-            
-        except ImportError:
-            # Driver no instalado, probar siguiente
-            continue
-        except Exception as e:
-            # Driver instalado pero falló la conexión
-            last_error = e
-            continue
-    
-    # Si llegamos aquí, ningún driver funcionó
-    error_msg = f"Error: Ningún driver funcionó. Último error: {last_error}"
-    
-    # Mostrar información de diagnóstico
-    with st.expander("🔍 Información de Diagnóstico", expanded=True):
-        st.markdown("""
-        **Problema:** Todos los drivers fallaron con timeout.
-        
-        **Posibles causas:**
-        1. ⚠️ Streamlit Cloud puede estar bloqueando conexiones salientes al puerto 5432
-        2. ⚠️ El hostname no se resuelve correctamente en Streamlit Cloud
-        3. ⚠️ Firewall o restricciones de red
-        
-        **Soluciones recomendadas:**
-        1. ✅ Verifica que Streamlit Cloud tenga acceso a internet
-        2. ✅ Considera usar la **API REST de Supabase** en lugar de conexión directa
-        3. ✅ Verifica que el host y credenciales sean correctos
-        
-        **Para usar API REST de Supabase:**
-        - Necesitas la URL de tu proyecto: `https://[project-id].supabase.co`
-        - Necesitas la API Key (anon key) de Supabase
-        - Usa la biblioteca `supabase-py` que ya está instalada
-        """)
-        
-        if '.supabase.co' in _host:
-            st.info(f"""
-            **Tu configuración actual:**
-            - Host: `{_host}`
-            - Usuario: `{user_para_conexion}`
-            - Puerto: `{_port}`
-            
-            **Para obtener tus credenciales de API REST:**
-            1. Ve a tu proyecto en Supabase
-            2. Settings → API
-            3. Copia la "Project URL" y "anon public" key
-            """)
-    
-    st.error(error_msg)
-    st.sidebar.error(f"❌ Todos los drivers fallaron")
-    return None
 
 def verificar_conexion_db():
     """Verificar estado de la conexión a la base de datos"""
@@ -354,12 +197,24 @@ def verificar_conexion_db():
             _user=config['user'],
             _password=config['password']
         )
-        if engine:
-            from sqlalchemy import text
-            with engine.connect() as conn:
-                conn.execute(text("SELECT 1"))
-            return True, None
-        return False, "No se pudo crear el engine"
+        if engine is None:
+            return False, "No se pudo crear la conexión"
+        
+        # Si es API REST, verificar de otra forma
+        if isinstance(engine, dict) and engine.get('type') == 'api_rest':
+            try:
+                client = engine['client']
+                # Intentar una consulta simple
+                response = client.table('_prisma_migrations').select("id").limit(1).execute()
+                return True, "Conectado vía API REST de Supabase"
+            except Exception as e:
+                return False, f"Error con API REST: {str(e)}"
+        
+        # Verificar conexión directa
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return True, "Conexión exitosa (Directa)"
     except Exception as e:
         return False, str(e)
 
