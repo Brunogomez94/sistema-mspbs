@@ -74,12 +74,14 @@ def get_engine():
     global engine
     try:
         config = get_db_config_licitaciones()
-        # Siempre crear nuevo engine para usar la configuración actual
+        # Supabase requiere SSL - siempre crear nuevo engine para usar la configuración actual
+        conn_str = f"postgresql://{config['user']}:{config['password']}@{config['host']}:{config['port']}/{config['name']}?sslmode=require"
         engine = create_engine(
-            f"postgresql://{config['user']}:{config['password']}@{config['host']}:{config['port']}/{config['name']}",
+            conn_str,
             connect_args={
                 "client_encoding": "utf8",
-                "connect_timeout": 10
+                "connect_timeout": 10,
+                "sslmode": "require"
             },
             pool_pre_ping=True
         )

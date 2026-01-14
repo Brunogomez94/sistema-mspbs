@@ -104,12 +104,14 @@ def get_db_config_dashboard():
 def get_engine(_host, _port, _database, _user, _password):
     """Crear engine con cache que se invalida cuando cambian los secrets"""
     try:
-        conn_str = f"postgresql://{_user}:{_password}@{_host}:{_port}/{_database}"
+        # Supabase requiere SSL
+        conn_str = f"postgresql://{_user}:{_password}@{_host}:{_port}/{_database}?sslmode=require"
         engine = create_engine(
             conn_str, 
             connect_args={
                 "client_encoding": "utf8",
-                "connect_timeout": 10
+                "connect_timeout": 10,
+                "sslmode": "require"
             },
             pool_pre_ping=True
         )
