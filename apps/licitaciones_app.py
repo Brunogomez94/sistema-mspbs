@@ -684,25 +684,73 @@ def formatear_columnas_tabla(df, mapeo_columnas=None):
     return df_formateado
 
 def configurar_tabla_usuarios():
-    """Crea la tabla de usuarios si no existe"""
+    """Crea la tabla de usuarios si no existe - compatible con API REST y conexión directa"""
     try:
-        print("Intentando configurar tabla de usuarios...")
         engine = get_engine()
         if engine is None:
             st.error("No se pudo conectar a la base de datos")
             return
+        
+        # Si es API REST, no podemos crear tablas directamente
+        # Solo verificar si existe y mostrar mensaje
+        if isinstance(engine, dict) and engine.get('type') == 'api_rest':
+            client = engine['client']
+            # Intentar acceder a la tabla para verificar si existe
+            try:
+                # Probar diferentes formatos de nombre de tabla
+                for table_name in ['usuarios', 'oxigeno_usuarios', 'oxigeno.usuarios']:
+                    try:
+                        response = client.table(table_name).select("id").limit(1).execute()
+                        # Si funciona, la tabla existe
+                        return
+                    except:
+                        continue
+                # Si ninguna funcionó, la tabla no existe
+                st.warning("""
+                ⚠️ **La tabla de usuarios no existe en Supabase**
+                
+                **Para crear la tabla:**
+                1. Ve a Supabase → SQL Editor
+                2. Ejecuta el siguiente SQL:
+                
+                ```sql
+                CREATE SCHEMA IF NOT EXISTS oxigeno;
+                
+                CREATE TABLE IF NOT EXISTS oxigeno.usuarios (
+                    id SERIAL PRIMARY KEY,
+                    cedula VARCHAR(20) UNIQUE NOT NULL,
+                    username VARCHAR(50) UNIQUE NOT NULL,
+                    password VARCHAR(200) NOT NULL,
+                    nombre_completo VARCHAR(100) NOT NULL,
+                    role VARCHAR(20) NOT NULL DEFAULT 'user',
+                    fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    ultimo_cambio_password TIMESTAMP
+                );
+                
+                -- Crear usuario admin por defecto
+                INSERT INTO oxigeno.usuarios (cedula, username, password, nombre_completo, role)
+                VALUES ('123456', 'admin', '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918', 'Administrador', 'admin')
+                ON CONFLICT (username) DO NOTHING;
+                ```
+                
+                La contraseña por defecto del admin es: `admin`
+                """)
+            except Exception as e:
+                st.warning(f"No se pudo verificar la tabla: {e}")
+            return
+        
+        # Conexión directa - crear tabla normalmente
         with engine.connect() as conn:
-            print("Conexión establecida, creando tabla...")
-            
             # Crear esquema si no existe
             conn.execute(text("""
                 CREATE SCHEMA IF NOT EXISTS oxigeno;
             """))
+            conn.commit()
             
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS oxigeno.usuarios (
                     id SERIAL PRIMARY KEY,
-                    cedula VARCHAR(20) UNIQUE NOT NULL,  -- Agregar la columna cédula
+                    cedula VARCHAR(20) UNIQUE NOT NULL,
                     username VARCHAR(50) UNIQUE NOT NULL,
                     password VARCHAR(200) NOT NULL,
                     nombre_completo VARCHAR(100) NOT NULL,
@@ -711,6 +759,7 @@ def configurar_tabla_usuarios():
                     ultimo_cambio_password TIMESTAMP
                 );
             """))
+            conn.commit()
             
             # Verificar si existe el usuario admin
             query = text("SELECT COUNT(*) FROM oxigeno.usuarios WHERE username = 'admin'")
