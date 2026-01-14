@@ -109,29 +109,30 @@ def get_db_engine(_host, _port, _dbname, _user, _password):
         ipv4_address = None
         try:
             import socket
-            # Obtener solo direcciones IPv4 (AF_INET)
+            # Obtener solo direcciones IPv4 (AF_INET) - forzar IPv4
             addr_info = socket.getaddrinfo(host_para_conexion, _port, socket.AF_INET, socket.SOCK_STREAM)
             if addr_info:
                 ipv4_address = addr_info[0][4][0]
-                # Usar la IP directamente en lugar del hostname
-                conn_str = f"postgresql://{user_para_conexion}:{_password}@{ipv4_address}:{_port}/{_dbname}?sslmode=require"
         except Exception as e:
             # Si falla la resolución, usar el hostname original
-            # pero intentar forzar IPv4 en connect_args
             pass
         
-        # Configurar connect_args con SSL y forzar IPv4 si es posible
+        # Configurar connect_args con SSL
         connect_args = {
             "client_encoding": "utf8",
             "connect_timeout": 10,
             "sslmode": "require"
         }
         
-        # Si tenemos la IP, usar hostaddr para forzar IPv4
+        # Si tenemos IPv4, usar hostaddr para forzar IPv4 y evitar resolución DNS
         if ipv4_address:
+            # Usar hostaddr en lugar de hostname para evitar resolución DNS a IPv6
             connect_args["hostaddr"] = ipv4_address
-            # No usar hostname si tenemos IP
-            # La cadena de conexión ya tiene la IP
+            # Construir URL con IP directamente
+            conn_str = f"postgresql://{user_para_conexion}:{_password}@{ipv4_address}:{_port}/{_dbname}?sslmode=require"
+        else:
+            # Si no se pudo resolver a IPv4, usar hostname original
+            conn_str = f"postgresql://{user_para_conexion}:{_password}@{host_para_conexion}:{_port}/{_dbname}?sslmode=require"
         
         # Crear engine con configuración optimizada
         engine = create_engine(
