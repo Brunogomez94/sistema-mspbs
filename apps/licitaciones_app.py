@@ -4225,19 +4225,39 @@ def pagina_cambiar_password():
     """Página para cambiar contraseña del usuario actual"""
     st.header("Cambiar Contraseña")
     
+    # Obtener engine
+    engine = get_engine()
+    if engine is None:
+        st.error("No se pudo conectar a la base de datos")
+        return
+    
     # Verificar si el usuario debe cambiar su contraseña
-    with engine.connect() as conn:
-        query = text("""
+    # Si es API REST, usar execute_query
+    if isinstance(engine, dict) and engine.get('type') == 'api_rest':
+        query = """
             SELECT ultimo_cambio_password 
             FROM public.usuarios
             WHERE id = :user_id
-        """)
-        
-        result = conn.execute(query, {'user_id': st.session_state.user_id})
-        ultimo_cambio = result.scalar()
-        
-        if ultimo_cambio is None:
-            st.warning("⚠️ Se requiere cambiar su contraseña. Por favor, establezca una nueva contraseña para continuar.")
+        """
+        result = execute_query(query, params={'user_id': st.session_state.user_id}, fetch_one=True)
+        if result:
+            ultimo_cambio = result.get('ultimo_cambio_password') if isinstance(result, dict) else result[0] if isinstance(result, tuple) else None
+        else:
+            ultimo_cambio = None
+    else:
+        # Conexión directa
+        with engine.connect() as conn:
+            query = text("""
+                SELECT ultimo_cambio_password 
+                FROM public.usuarios
+                WHERE id = :user_id
+            """)
+            
+            result = conn.execute(query, {'user_id': st.session_state.user_id})
+            ultimo_cambio = result.scalar()
+    
+    if ultimo_cambio is None:
+        st.warning("⚠️ Se requiere cambiar su contraseña. Por favor, establezca una nueva contraseña para continuar.")
     
     with st.form("cambiar_password_form"):
         password_actual = st.text_input("Contraseña actual:", type="password")
@@ -4276,51 +4296,100 @@ def pagina_cambiar_password():
                     # Verificar contraseña actual
                     password_hash_actual = hashlib.sha256(password_actual.encode()).hexdigest()
                     
-                    engine = get_engine()
+                    # engine ya está definido al inicio de la función
                     if engine is None:
                         st.error("No se pudo conectar a la base de datos")
                         return
-                    with engine.connect() as conn:
-                        query = text("""
+                    
+                    # Si es API REST, usar execute_query
+                    if isinstance(engine, dict) and engine.get('type') == 'api_rest':
+                        # Verificar contraseña actual
+                        query = """
                             SELECT COUNT(*) 
                             FROM public.usuarios
                             WHERE id = :user_id AND password = :password
-                        """)
-                        
-                        result = conn.execute(query, {
+                        """
+                        result = execute_query(query, params={
                             'user_id': st.session_state.user_id,
                             'password': password_hash_actual
-                        })
+                        }, fetch_one=True)
                         
-                        count = result.scalar()
+                        # execute_query con API REST retorna dict o lista
+                        if isinstance(result, dict):
+                            count = result.get('count', 0) if 'count' in result else (1 if result else 0)
+                        elif isinstance(result, tuple):
+                            count = result[0] if result else 0
+                        else:
+                            count = 1 if result else 0
                         
                         if count == 0:
                             st.error("La contraseña actual es incorrecta.")
                         else:
-                            # Actualizar contraseña
+                            # Actualizar contraseña usando API REST
                             password_hash_nueva = hashlib.sha256(password_nueva.encode()).hexdigest()
                             
+                            client = engine.get('client')
+                            if client:
+                                # Usar Supabase API para actualizar
+                                response = client.table('usuarios').update({
+                                    'password': password_hash_nueva,
+                                    'ultimo_cambio_password': 'now()'
+                                }).eq('id', st.session_state.user_id).execute()
+                                
+                                if response.data:
+                                    st.success("✅ Contraseña actualizada correctamente.")
+                                    
+                                    # Si se requería cambio de contraseña, actualizar el estado de la sesión
+                                    if 'requiere_cambio_password' in st.session_state and st.session_state.requiere_cambio_password:
+                                        st.session_state.requiere_cambio_password = False
+                                        st.info("Ya puede acceder a todas las funcionalidades del sistema.")
+                                        time.sleep(2)
+                                        st.rerun()
+                                else:
+                                    st.error("No se pudo actualizar la contraseña.")
+                    else:
+                        # Conexión directa
+                        with engine.connect() as conn:
                             query = text("""
-                                UPDATE public.usuarios
-                                SET password = :password, ultimo_cambio_password = CURRENT_TIMESTAMP
-                                WHERE id = :user_id
+                                SELECT COUNT(*) 
+                                FROM public.usuarios
+                                WHERE id = :user_id AND password = :password
                             """)
                             
-                            conn.execute(query, {
-                                'password': password_hash_nueva,
-                                'user_id': st.session_state.user_id
+                            result = conn.execute(query, {
+                                'user_id': st.session_state.user_id,
+                                'password': password_hash_actual
                             })
                             
-                            conn.commit()  # ✅ Hacer commit explícito
+                            count = result.scalar()
                             
-                            st.success("Contraseña cambiada exitosamente.")
-                            
-                            # Si se requería cambio de contraseña, actualizar el estado de la sesión
-                            if 'requiere_cambio_password' in st.session_state and st.session_state.requiere_cambio_password:
-                                st.session_state.requiere_cambio_password = False
-                                st.info("Ya puede acceder a todas las funcionalidades del sistema.")
-                                time.sleep(2)
-                                st.rerun()
+                            if count == 0:
+                                st.error("La contraseña actual es incorrecta.")
+                            else:
+                                # Actualizar contraseña
+                                password_hash_nueva = hashlib.sha256(password_nueva.encode()).hexdigest()
+                                
+                                query = text("""
+                                    UPDATE public.usuarios
+                                    SET password = :password, ultimo_cambio_password = CURRENT_TIMESTAMP
+                                    WHERE id = :user_id
+                                """)
+                                
+                                conn.execute(query, {
+                                    'password': password_hash_nueva,
+                                    'user_id': st.session_state.user_id
+                                })
+                                
+                                conn.commit()  # ✅ Hacer commit explícito
+                                
+                                st.success("Contraseña cambiada exitosamente.")
+                                
+                                # Si se requería cambio de contraseña, actualizar el estado de la sesión
+                                if 'requiere_cambio_password' in st.session_state and st.session_state.requiere_cambio_password:
+                                    st.session_state.requiere_cambio_password = False
+                                    st.info("Ya puede acceder a todas las funcionalidades del sistema.")
+                                    time.sleep(2)
+                                    st.rerun()
                 except Exception as e:
                     st.error(f"Error al cambiar contraseña: {e}")
 
