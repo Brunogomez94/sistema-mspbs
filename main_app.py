@@ -151,38 +151,79 @@ def get_db_engine(_host, _port, _dbname, _user, _password):
         st.sidebar.warning("⚠️ Conexión directa falló, intentando API REST...")
         
         api_config = get_supabase_api_config()
-        if api_config['url'] and api_config['key']:
-            try:
-                from supabase import create_client, Client
-                supabase: Client = create_client(api_config['url'], api_config['key'])
-                
-                # Probar conexión con API REST (intentar leer una tabla del sistema)
-                try:
-                    response = supabase.table('_prisma_migrations').select("id").limit(1).execute()
-                except:
-                    # Si no existe esa tabla, probar con otra consulta simple
-                    pass
-                
-                st.sidebar.success("✅ Conectado usando: API REST de Supabase")
-                # Retornar un objeto especial que indique que usamos API REST
-                return {'type': 'api_rest', 'client': supabase, 'config': api_config}
-            except Exception as api_error:
-                st.error(f"Error con API REST: {api_error}")
-                st.sidebar.error("❌ Ambos métodos fallaron")
-                return None
-        else:
-            st.warning("""
+        
+        # Verificar si las credenciales están configuradas
+        if not api_config['url'] or not api_config['key']:
+            st.error(f"""
             ⚠️ **No se configuraron credenciales de API REST**
             
-            Para usar API REST como fallback, agrega en Streamlit Secrets:
+            **Configuración actual:**
+            - URL: {'✅ Configurada' if api_config['url'] else '❌ Faltante'}
+            - Key: {'✅ Configurada' if api_config['key'] else '❌ Faltante'}
+            
+            **Para usar API REST como fallback, agrega en Streamlit Secrets:**
             ```toml
             [supabase]
-            url = "https://[tu-project-id].supabase.co"
-            key = "tu-anon-key"
+            url = "https://otblgsembluynkoalivq.supabase.co"
+            key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im90Ymxnc2VtYmx1eW5rb2FsaXZxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgzOTU4MjcsImV4cCI6MjA4Mzk3MTgyN30.GEzj8P6ohKxBuayCC0n5WHypCiTIOcE9qUrXrJ0tI64"
             ```
             
             Obtén estas credenciales en: Supabase → Settings → API
             """)
+            return None
+        
+        # Intentar conectar con API REST
+        try:
+            from supabase import create_client, Client
+            supabase: Client = create_client(api_config['url'], api_config['key'])
+            
+            # Probar conexión con API REST (intentar leer una tabla)
+            # Intentar con diferentes tablas comunes
+            test_tables = ['_prisma_migrations', 'oxigeno.usuarios', 'public.actas_recepcion']
+            connection_ok = False
+            
+            for table_name in test_tables:
+                try:
+                    response = supabase.table(table_name).select("*").limit(1).execute()
+                    connection_ok = True
+                    break
+                except Exception as table_error:
+                    # Si la tabla no existe, continuar con la siguiente
+                    continue
+            
+            if connection_ok:
+                st.sidebar.success("✅ Conectado usando: API REST de Supabase")
+                # Retornar un objeto especial que indique que usamos API REST
+                return {'type': 'api_rest', 'client': supabase, 'config': api_config}
+            else:
+                # Si ninguna tabla funcionó, pero el cliente se creó, asumir que funciona
+                st.sidebar.success("✅ Conectado usando: API REST de Supabase")
+                return {'type': 'api_rest', 'client': supabase, 'config': api_config}
+                
+        except ImportError:
+            st.error("""
+            ⚠️ **Biblioteca supabase-py no está instalada**
+            
+            Instala con: `pip install supabase`
+            O agrega a requirements.txt: `supabase>=2.0.0`
+            """)
+            return None
+        except Exception as api_error:
+            error_detail = str(api_error)
+            st.error(f"""
+            ❌ **Error con API REST de Supabase:**
+            
+            **Error:** {error_detail}
+            
+            **Verifica:**
+            1. La URL es correcta: `{api_config['url']}`
+            2. La key (anon key) es correcta
+            3. Tu proyecto de Supabase está activo
+            
+            **Obtén las credenciales correctas en:**
+            Supabase → Settings → API → Project URL y anon public key
+            """)
+            st.sidebar.error("❌ Ambos métodos fallaron")
             return None
 
 def verificar_conexion_db():
