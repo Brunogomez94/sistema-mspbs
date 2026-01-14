@@ -248,20 +248,23 @@ class PostgresConnection:
 
     def connect(self):
         try:
-            # Conexión con psycopg2
+            # Conexión con psycopg2 - Supabase requiere SSL
             self.conn = psycopg2.connect(
                 host=self.host,
                 port=self.port,
                 dbname=self.dbname,
                 user=self.user,
-                password=self.password
+                password=self.password,
+                sslmode='require'
             )
             self.conn.autocommit = True  # Para crear esquemas
             
-            # Conexión con SQLAlchemy para pandas to_sql
-            # Supabase requiere SSL
+            # Conexión con SQLAlchemy para pandas to_sql - Supabase requiere SSL
             connection_string = f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.dbname}?sslmode=require"
-            self.engine = create_engine(connection_string)
+            self.engine = create_engine(
+                connection_string,
+                connect_args={"sslmode": "require"}
+            )
             
             logger.info("Conexión a PostgreSQL establecida correctamente")
             return True
