@@ -2701,22 +2701,29 @@ def pagina_cargar_archivo():
                             st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
                             return
                         with engine.connect() as conn:
-                            esquemas = obtener_esquemas_postgres()
+                            codigos = obtener_codigos_licitacion()
                             duplicado_encontrado = False
                             
-                            for esquema in esquemas:
+                            # Generar código de licitación esperado
+                            codigo_esperado = f"{modalidad}_{numero_anio}".upper().replace(' ', '_')
+                            
+                            for codigo in codigos:
                                 try:
-                                    query = text(f"""
-                                        SELECT "I_D", "NOMBRE_DEL_LLAMADO", "EMPRESA_ADJUDICADA", "NUMERO_DE_LLAMADO"
-                                        FROM "{esquema}"."llamado"
-                                        WHERE "I_D" = :id_licitacion
+                                    query = text("""
+                                        SELECT "I_D", "NOMBRE_DEL_LLAMADO", "EMPRESA_ADJUDICADA", "NUMERO_DE_LLAMADO", codigo_licitacion
+                                        FROM oxigeno.llamado
+                                        WHERE codigo_licitacion = :codigo
+                                        AND "I_D" = :id_licitacion
                                     """)
-                                    result = conn.execute(query, {'id_licitacion': id_licitacion})
+                                    result = conn.execute(query, {
+                                        'codigo': codigo,
+                                        'id_licitacion': id_licitacion
+                                    })
                                     coincidencia = result.fetchone()
                                     
                                     if coincidencia:
                                         duplicado_encontrado = True
-                                        st.info(f"ℹ️ Ya existe la licitación ID '{id_licitacion}' en el esquema '{esquema}'.")
+                                        st.info(f"ℹ️ Ya existe la licitación ID '{id_licitacion}' con código '{codigo}'.")
                                         st.info(f"📋 Detalles: {coincidencia[1]} - Empresa: {coincidencia[2]} - N°: {coincidencia[3]}")
                                         st.success(f"✅ Puede agregar datos de OTRO SERVICIO a esta misma licitación.")
                                         st.warning(f"⚠️ Nota: Los datos de '{servicio_beneficiario}' se AGREGARÁN a los existentes sin eliminar nada.")
@@ -4773,7 +4780,7 @@ def pagina_cambiar_password():
                 except Exception as e:
                     st.error(f"Error al cambiar contraseña: {e}")
 
-def obtener_datos_items(esquema, servicio=None):
+def obtener_datos_items(codigo_licitacion, servicio=None):
     """Obtiene los datos de los items disponibles para generar órdenes de compra"""
     try:
         api_config = get_supabase_api_config()
@@ -4783,7 +4790,7 @@ def obtener_datos_items(esquema, servicio=None):
             return
         with engine.connect() as conn:
             # Consulta para obtener items disponibles desde ejecucion_general
-            query = text(f"""
+            query = text("""
                 SELECT 
                     "LOTE",
                     "ITEM",
@@ -4796,13 +4803,14 @@ def obtener_datos_items(esquema, servicio=None):
                     "CANTIDAD_MAXIMA",
                     "CANTIDAD_EMITIDA",
                     "SALDO_A_EMITIR"
-                FROM "{esquema}"."ejecucion_general"
-                WHERE "SALDO_A_EMITIR" > 0
+                FROM oxigeno.ejecucion_general
+                WHERE codigo_licitacion = :codigo
+                AND "SALDO_A_EMITIR" > 0
             """)
             
             # Si se especifica un servicio, filtrar por ese servicio
             if servicio:
-                query = text(f"""
+                query = text("""
                     SELECT 
                         "LOTE",
                         "ITEM",
@@ -4815,13 +4823,14 @@ def obtener_datos_items(esquema, servicio=None):
                         "CANTIDAD_MAXIMA",
                         "CANTIDAD_EMITIDA",
                         "SALDO_A_EMITIR"
-                    FROM "{esquema}"."ejecucion_general"
-                    WHERE "SALDO_A_EMITIR" > 0
+                    FROM oxigeno.ejecucion_general
+                    WHERE codigo_licitacion = :codigo
+                    AND "SALDO_A_EMITIR" > 0
                     AND "SERVICIO_BENEFICIARIO" = :servicio
                 """)
-                result = conn.execute(query, {'servicio': servicio})
+                result = conn.execute(query, {'codigo': codigo_licitacion, 'servicio': servicio})
             else:
-                result = conn.execute(query)
+                result = conn.execute(query, {'codigo': codigo_licitacion})
                 
             items = []
             for row in result:
@@ -4853,13 +4862,14 @@ def obtener_servicios_beneficiarios(esquema):
             st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return
         with engine.connect() as conn:
-            query = text(f"""
+            query = text("""
                 SELECT DISTINCT "SERVICIO_BENEFICIARIO"
-                FROM "{esquema}"."ejecucion_general"
-                WHERE "SERVICIO_BENEFICIARIO" IS NOT NULL
+                FROM oxigeno.ejecucion_general
+                WHERE codigo_licitacion = :codigo
+                AND "SERVICIO_BENEFICIARIO" IS NOT NULL
                 ORDER BY "SERVICIO_BENEFICIARIO"
             """)
-            result = conn.execute(query)
+            result = conn.execute(query, {'codigo': codigo_licitacion})
             
             servicios = [row[0] for row in result]
             return servicios
@@ -4867,7 +4877,7 @@ def obtener_servicios_beneficiarios(esquema):
         st.error(f"Error obteniendo servicios beneficiarios: {e}")
         return []
 
-def obtener_proximo_numero_oc(esquema, year=None):
+def obtener_proximo_numero_oc(codigo_licitacion, year=None):
     """
     Obtiene el próximo número de orden de compra secuencial simple
     Formato: 1, 2, 3, ... 100, 101 (sin año, sin barras)
@@ -4881,15 +4891,16 @@ def obtener_proximo_numero_oc(esquema, year=None):
             return
         with engine.connect() as conn:
             # Buscar el número máximo actual (extrae solo dígitos)
-            query = text(f"""
+            query = text("""
                 SELECT MAX(
                     CAST(
                         REGEXP_REPLACE(COALESCE("NUMERO_ORDEN_DE_COMPRA", '0'), '[^0-9]', '', 'g') 
                         AS INTEGER
                     )
                 ) as max_num
-                FROM "{esquema}"."orden_de_compra" 
-                WHERE "NUMERO_ORDEN_DE_COMPRA" IS NOT NULL 
+                FROM oxigeno.orden_de_compra
+                WHERE codigo_licitacion = :codigo
+                AND "NUMERO_ORDEN_DE_COMPRA" IS NOT NULL 
                   AND "NUMERO_ORDEN_DE_COMPRA" != ''
                   AND "NUMERO_ORDEN_DE_COMPRA" != '-'
             """)
@@ -4908,7 +4919,7 @@ def obtener_proximo_numero_oc(esquema, year=None):
         # Si hay error, devolver "1"
         return "1"
 
-def crear_orden_compra(esquema, numero_orden, fecha_emision, servicio_beneficiario, simese, items):
+def crear_orden_compra(codigo_licitacion, numero_orden, fecha_emision, servicio_beneficiario, simese, items):
     """
     Crea una nueva orden de compra con sus items
     
@@ -5166,19 +5177,20 @@ def pagina_dashboard():
             
             for lic_display in licitaciones_seleccionadas:
                 lic_info = licitaciones_info[lic_display]
-                esquema = lic_info['esquema']
+                codigo_licitacion = lic_info['codigo_licitacion']
                 empresa = lic_info['empresa']
                 numero = lic_info['numero']
                 anio = lic_info['anio']
                 
-                # Obtener modalidad del esquema
+                # Obtener modalidad del código de licitación
                 try:
-                    query_llamado = text(f"""
+                    query_llamado = text("""
                         SELECT "MODALIDAD"
-                        FROM "{esquema}".llamado
+                        FROM oxigeno.llamado
+                        WHERE codigo_licitacion = :codigo
                         LIMIT 1
                     """)
-                    result_llamado = conn.execute(query_llamado)
+                    result_llamado = conn.execute(query_llamado, {'codigo': codigo_licitacion})
                     row_llamado = result_llamado.fetchone()
                     modalidad = row_llamado[0] if row_llamado else ""
                     llamado = f"{modalidad} {numero}/{anio}".strip() if modalidad else f"{numero}/{anio}"
@@ -5187,7 +5199,7 @@ def pagina_dashboard():
                 
                 try:
                     # ⭐ LEER DE ejecucion_general CON CÁLCULO DE MONTOS
-                    query_servicios = text(f"""
+                    query_servicios = text("""
                         SELECT 
                             "SERVICIO_BENEFICIARIO" as servicio,
                             SUM("CANTIDAD_EMITIDA") as cantidad_emitida,
@@ -5195,13 +5207,14 @@ def pagina_dashboard():
                             SUM("CANTIDAD_EMITIDA" * "PRECIO_UNITARIO") as monto_emitido,
                             SUM("TOTAL_ADJUDICADO" * "PRECIO_UNITARIO") as monto_adjudicado,
                             AVG("PORCENTAJE_EMITIDO") as porcentaje
-                        FROM "{esquema}"."ejecucion_general"
-                        WHERE "SERVICIO_BENEFICIARIO" IS NOT NULL
+                        FROM oxigeno.ejecucion_general
+                        WHERE codigo_licitacion = :codigo
+                        AND "SERVICIO_BENEFICIARIO" IS NOT NULL
                         AND "SERVICIO_BENEFICIARIO" != ''
                         GROUP BY "SERVICIO_BENEFICIARIO"
                     """)
                     
-                    result = conn.execute(query_servicios)
+                    result = conn.execute(query_servicios, {'codigo': codigo_licitacion})
                     
                     for row in result:
                         datos_consolidados.append({
@@ -5213,7 +5226,7 @@ def pagina_dashboard():
                             'Monto_Adjudicado': float(row[4]) if row[4] else 0,
                             'Porcentaje': float(row[5]) if row[5] else 0,
                             'Empresa': empresa,
-                            'Esquema': esquema
+                            'Codigo_Licitacion': codigo_licitacion
                         })
                 
                 except Exception as e:
