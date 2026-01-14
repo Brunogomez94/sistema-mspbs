@@ -314,7 +314,11 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
             st.warning("API REST solo soporta consultas SELECT. Para INSERT/UPDATE/DELETE usa conexión directa.")
             return None
     
-    # Conexión directa
+    # Conexión directa - verificar que engine no sea dict (API REST)
+    if isinstance(engine, dict):
+        st.error("⚠️ Esta operación requiere conexión directa a PostgreSQL. No disponible con API REST.")
+        return None
+    
     from sqlalchemy import text
     query_obj = text(query)
     
