@@ -105,22 +105,23 @@ def get_engine(_api_url=None, _api_key=None):
             from supabase import create_client, Client
             supabase: Client = create_client(api_config['url'], api_config['key'])
             
-            # Probar conexión básica
+            # Probar conexión básica - si falla, no es crítico
             try:
                 # Intentar con 'usuarios' (en public) primero
                 response = supabase.table('usuarios').select("id").limit(1).execute()
-                return {'type': 'api_rest', 'client': supabase, 'config': api_config}
             except Exception:
                 # Si falla, aún así retornar API REST (puede que la tabla no exista aún)
-                return {'type': 'api_rest', 'client': supabase, 'config': api_config}
+                pass
+            
+            return {'type': 'api_rest', 'client': supabase, 'config': api_config}
         except ImportError:
-            st.error("⚠️ La librería 'supabase' no está instalada. Ejecuta: pip install supabase")
+            # No mostrar error aquí, solo retornar None
             return None
         except Exception as e:
-            st.error(f"⚠️ Error conectando a Supabase API REST: {e}")
+            # No mostrar error aquí, solo retornar None
             return None
     
-    st.error("⚠️ Configuración de Supabase API REST no encontrada. Verifica los secrets.")
+    # No mostrar error aquí, solo retornar None
     return None
 
 def get_direct_connection():
