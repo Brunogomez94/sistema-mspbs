@@ -65,21 +65,37 @@ def get_db_config():
     }
 
 @st.cache_resource
-def get_db_engine():
-    """Crear conexión centralizada a PostgreSQL"""
+def get_db_engine(_host, _port, _dbname, _user, _password):
+    """Crear conexión centralizada a PostgreSQL
+    
+    Los parámetros con _ son para invalidar el cache cuando cambien los secrets
+    """
     try:
         from sqlalchemy import create_engine
-        config = get_db_config()
-        conn_str = f"postgresql://{config['user']}:{config['password']}@{config['host']}:{config['port']}/{config['dbname']}"
+        
+        # Debug: verificar que estamos usando el host correcto
+        if _host == 'localhost':
+            st.warning(f"⚠️ ADVERTENCIA: Se está usando 'localhost' en lugar del host de Supabase. Verifica los secrets.")
+        
+        conn_str = f"postgresql://{_user}:{_password}@{_host}:{_port}/{_dbname}"
         engine = create_engine(conn_str, connect_args={"client_encoding": "utf8"})
         return engine
     except Exception as e:
+        st.error(f"Error creando engine: {e}")
         return None
 
 def verificar_conexion_db():
     """Verificar estado de la conexión a la base de datos"""
     try:
-        engine = get_db_engine()
+        config = get_db_config()
+        # Pasar los valores como parámetros para que el cache se invalide si cambian
+        engine = get_db_engine(
+            _host=config['host'],
+            _port=config['port'],
+            _dbname=config['dbname'],
+            _user=config['user'],
+            _password=config['password']
+        )
         if engine:
             from sqlalchemy import text
             with engine.connect() as conn:
