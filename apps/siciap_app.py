@@ -1,14 +1,23 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+# Usar pg8000 en lugar de psycopg2 para mejor compatibilidad con Supabase
+# pg8000 es un driver puro de Python que maneja mejor IPv6/IPv4
 try:
-    import psycopg2
+    import pg8000
+    USE_PG8000 = True
 except ImportError:
-    # psycopg2-binary se importa como psycopg2
+    # Fallback a psycopg2 si pg8000 no está disponible
     try:
-        import psycopg2_binary as psycopg2
+        import psycopg2
+        USE_PG8000 = False
     except ImportError:
-        psycopg2 = None
+        try:
+            import psycopg2_binary as psycopg2
+            USE_PG8000 = False
+        except ImportError:
+            psycopg2 = None
+            USE_PG8000 = False
 import os
 import re
 import logging
