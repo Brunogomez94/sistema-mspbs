@@ -226,6 +226,38 @@ def get_db_engine(_host, _port, _dbname, _user, _password):
             st.sidebar.error("❌ Ambos métodos fallaron")
             return None
 
+def execute_query(engine, query, params=None):
+    """
+    Ejecutar consulta SQL compatible con conexión directa y API REST
+    
+    Args:
+        engine: Engine de SQLAlchemy o dict con tipo 'api_rest'
+        query: Query SQL como string o text()
+        params: Parámetros opcionales
+    
+    Returns:
+        Resultado de la consulta
+    """
+    # Si es API REST, usar el cliente de Supabase
+    if isinstance(engine, dict) and engine.get('type') == 'api_rest':
+        client = engine['client']
+        # La API REST de Supabase no ejecuta SQL directo, necesita usar la API
+        # Por ahora, retornar None y mostrar mensaje
+        st.warning("⚠️ Las consultas SQL directas no están disponibles con API REST. Usa las funciones específicas de cada módulo.")
+        return None
+    
+    # Conexión directa con SQLAlchemy
+    from sqlalchemy import text
+    if isinstance(query, str):
+        query = text(query)
+    
+    with engine.connect() as conn:
+        if params:
+            result = conn.execute(query, params)
+        else:
+            result = conn.execute(query)
+        return result
+
 def verificar_conexion_db():
     """Verificar estado de la conexión a la base de datos"""
     try:
@@ -412,48 +444,66 @@ def show_home_page():
         st.markdown("### 📊 Estadísticas del Sistema")
         
         try:
-            engine = get_db_engine()
+            config = get_db_config()
+            engine = get_db_engine(
+                _host=config['host'],
+                _port=config['port'],
+                _dbname=config['dbname'],
+                _user=config['user'],
+                _password=config['password']
+            )
             if engine:
-                from sqlalchemy import text
-                with engine.connect() as conn:
-                    # Contar esquemas de licitaciones
-                    try:
-                        esquemas_query = text("""
-                            SELECT count(*) as total_esquemas
-                            FROM information_schema.schemata 
-                            WHERE schema_name NOT IN ('information_schema', 'pg_catalog', 'pg_toast', 'public')
-                        """)
-                        esquemas_result = conn.execute(esquemas_query).fetchone()
-                        total_esquemas = esquemas_result[0] if esquemas_result else 0
-                    except:
-                        total_esquemas = 0
+                # Si es API REST, mostrar mensaje diferente
+                if isinstance(engine, dict) and engine.get('type') == 'api_rest':
+                    st.info("""
+                    📊 **Estadísticas del Sistema**
                     
-                    # Contar datos de contrataciones
-                    try:
-                        contrataciones_query = text("SELECT count(*) FROM contrataciones_datos WHERE entidad = 'Ministerio de Salud Pública y Bienestar Social'")
-                        contrataciones_result = conn.execute(contrataciones_query).fetchone()
-                        total_contrataciones = contrataciones_result[0] if contrataciones_result else 0
-                    except:
-                        total_contrataciones = 0
+                    ✅ Conectado vía API REST de Supabase
                     
-                    # Contar órdenes SICIAP
-                    try:
-                        siciap_query = text("SELECT count(*) FROM siciap.ordenes")
-                        siciap_result = conn.execute(siciap_query).fetchone()
-                        total_siciap = siciap_result[0] if siciap_result else 0
-                    except:
-                        total_siciap = 0
-                
-                # Mostrar métricas
-                col_a, col_b, col_c, col_d = st.columns(4)
-                with col_a:
-                    st.metric("Esquemas de Licitaciones", total_esquemas, "📊")
-                with col_b:
-                    st.metric("Contrataciones", f"{total_contrataciones:,}", "🏥")
-                with col_c:
-                    st.metric("Órdenes SICIAP", f"{total_siciap:,}", "📋")
-                with col_d:
-                    st.metric("Sistemas Activos", "3", "🚀")
+                    Las estadísticas detalladas están disponibles en cada módulo específico.
+                    """)
+                else:
+                    # Conexión directa - ejecutar consultas SQL
+                    from sqlalchemy import text
+                    with engine.connect() as conn:
+                        # Contar esquemas de licitaciones
+                        try:
+                            esquemas_query = text("""
+                                SELECT count(*) as total_esquemas
+                                FROM information_schema.schemata 
+                                WHERE schema_name NOT IN ('information_schema', 'pg_catalog', 'pg_toast', 'public')
+                            """)
+                            esquemas_result = conn.execute(esquemas_query).fetchone()
+                            total_esquemas = esquemas_result[0] if esquemas_result else 0
+                        except:
+                            total_esquemas = 0
+                        
+                        # Contar datos de contrataciones
+                        try:
+                            contrataciones_query = text("SELECT count(*) FROM contrataciones_datos WHERE entidad = 'Ministerio de Salud Pública y Bienestar Social'")
+                            contrataciones_result = conn.execute(contrataciones_query).fetchone()
+                            total_contrataciones = contrataciones_result[0] if contrataciones_result else 0
+                        except:
+                            total_contrataciones = 0
+                        
+                        # Contar órdenes SICIAP
+                        try:
+                            siciap_query = text("SELECT count(*) FROM siciap.ordenes")
+                            siciap_result = conn.execute(siciap_query).fetchone()
+                            total_siciap = siciap_result[0] if siciap_result else 0
+                        except:
+                            total_siciap = 0
+                    
+                    # Mostrar métricas
+                    col_a, col_b, col_c, col_d = st.columns(4)
+                    with col_a:
+                        st.metric("Esquemas de Licitaciones", total_esquemas, "📊")
+                    with col_b:
+                        st.metric("Contrataciones", f"{total_contrataciones:,}", "🏥")
+                    with col_c:
+                        st.metric("Órdenes SICIAP", f"{total_siciap:,}", "📋")
+                    with col_d:
+                        st.metric("Sistemas Activos", "3", "🚀")
             else:
                 # Métricas por defecto si no hay engine
                 col_a, col_b, col_c, col_d = st.columns(4)
