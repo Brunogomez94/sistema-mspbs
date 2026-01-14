@@ -7698,10 +7698,10 @@ def pagina_ordenes_compra():
                                                 if st.button("📄 PDF Actualizado", key=f"pdf_edit_{acta[0]}"):
                                                     # Generar PDF con datos actuales
                                                     engine = get_engine()
-                                        if engine is None:
-                                            st.error("No se pudo conectar a la base de datos")
-                                            return
-                                        with engine.connect() as conn:
+                                                    if engine is None:
+                                                        st.error("No se pudo conectar a la base de datos")
+                                                        return
+                                                    with engine.connect() as conn:
                                                         query_orden = text(f"""
                                                             SELECT "SERVICIO_BENEFICIARIO"
                                                             FROM "{esquema_acta}".orden_de_compra
@@ -7711,33 +7711,33 @@ def pagina_ordenes_compra():
                                                         result_orden = conn.execute(query_orden, {"numero": acta_completa[3]})
                                                         orden_data = result_orden.fetchone()
                                                         servicio = orden_data[0] if orden_data else "DGGIES"
-                                                    
-                                                    pdf_bytes = generar_pdf_acta_recepcion(
-                                                        esquema_acta,
-                                                        acta_completa[3],
-                                                        acta_completa[4],
-                                                        servicio,
-                                                        "N/A",
-                                                        items_actuales,
-                                                        servicio,
-                                                        acta_completa[7],
-                                                        acta_completa[8],
-                                                        acta_completa[9],
-                                                        acta_completa[10],
-                                                        st.session_state.usuario_actual,
-                                                        fecha_remision=acta_completa[5],
-                                                        fecha_factura=acta_completa[6],
-                                                        numero_acta=acta_completa[1]
-                                                    )
-                                                    
-                                                    if pdf_bytes:
-                                                        st.download_button(
-                                                            "💾 Descargar PDF",
-                                                            data=pdf_bytes,
-                                                            file_name=f"Acta_{acta_completa[1].replace('/', '-')}.pdf",
-                                                            mime="application/pdf",
-                                                            key=f"dl_pdf_edit_{acta[0]}"
+                                                        
+                                                        pdf_bytes = generar_pdf_acta_recepcion(
+                                                            esquema_acta,
+                                                            acta_completa[3],
+                                                            acta_completa[4],
+                                                            servicio,
+                                                            "N/A",
+                                                            items_actuales,
+                                                            servicio,
+                                                            acta_completa[7],
+                                                            acta_completa[8],
+                                                            acta_completa[9],
+                                                            acta_completa[10],
+                                                            st.session_state.usuario_actual,
+                                                            fecha_remision=acta_completa[5],
+                                                            fecha_factura=acta_completa[6],
+                                                            numero_acta=acta_completa[1]
                                                         )
+                                                        
+                                                        if pdf_bytes:
+                                                            st.download_button(
+                                                                "💾 Descargar PDF",
+                                                                data=pdf_bytes,
+                                                                file_name=f"Acta_{acta_completa[1].replace('/', '-')}.pdf",
+                                                                mime="application/pdf",
+                                                                key=f"dl_pdf_edit_{acta[0]}"
+                                                            )
                                             with col_b4:
                                                 if st.button("🔙 Cerrar", key=f"cerrar_edit_{acta[0]}", use_container_width=True):
                                                     del st.session_state[f'mostrar_editar_acta_{acta[0]}']
@@ -7761,10 +7761,10 @@ def pagina_ordenes_compra():
                                         
                                         if items_acta:
                                             engine = get_engine()
-                                        if engine is None:
-                                            st.error("No se pudo conectar a la base de datos")
-                                            return
-                                        with engine.connect() as conn:
+                                            if engine is None:
+                                                st.error("No se pudo conectar a la base de datos")
+                                                return
+                                            with engine.connect() as conn:
                                                 query_orden = text(f"""
                                                     SELECT "SERVICIO_BENEFICIARIO"
                                                     FROM "{esquema_acta}".orden_de_compra
@@ -7774,29 +7774,29 @@ def pagina_ordenes_compra():
                                                 result_orden = conn.execute(query_orden, {"numero": acta_completa[3]})
                                                 orden_data = result_orden.fetchone()
                                                 servicio = orden_data[0] if orden_data else "DGGIES"
-                                            
-                                            pdf_bytes = generar_pdf_acta_recepcion(
-                                                esquema_acta,
-                                                acta_completa[3],
-                                                acta_completa[4],
-                                                servicio,
-                                                "N/A",
-                                                items_acta,
-                                                servicio,
-                                                acta_completa[7],
-                                                acta_completa[8],
-                                                acta_completa[9],
-                                                acta_completa[10],
-                                                st.session_state.usuario_actual,
-                                                fecha_remision=acta_completa[5],
-                                                fecha_factura=acta_completa[6],
-                                                numero_acta=acta_completa[1]
-                                            )
-                                            
-                                            if pdf_bytes:
-                                                st.success(f"✅ PDF de Acta {acta_completa[1]} generado")
-                                                st.download_button(
-                                                    label=f"💾 Descargar Acta {acta_completa[1]}",
+                                                
+                                                pdf_bytes = generar_pdf_acta_recepcion(
+                                                    esquema_acta,
+                                                    acta_completa[3],
+                                                    acta_completa[4],
+                                                    servicio,
+                                                    "N/A",
+                                                    items_acta,
+                                                    servicio,
+                                                    acta_completa[7],
+                                                    acta_completa[8],
+                                                    acta_completa[9],
+                                                    acta_completa[10],
+                                                    st.session_state.usuario_actual,
+                                                    fecha_remision=acta_completa[5],
+                                                    fecha_factura=acta_completa[6],
+                                                    numero_acta=acta_completa[1]
+                                                )
+                                                
+                                                if pdf_bytes:
+                                                    st.success(f"✅ PDF de Acta {acta_completa[1]} generado")
+                                                    st.download_button(
+                                                        label=f"💾 Descargar Acta {acta_completa[1]}",
                                                     data=pdf_bytes,
                                                     file_name=f"Acta_{acta_completa[1].replace('/', '-')}.pdf",
                                                     mime="application/pdf",
