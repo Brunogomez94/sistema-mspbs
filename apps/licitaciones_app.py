@@ -4332,13 +4332,18 @@ def pagina_cambiar_password():
                             'password': password_hash_actual
                         }, fetch_one=True)
                         
-                        # execute_query con API REST retorna dict o lista
-                        if isinstance(result, dict):
+                        # execute_query con COUNT(*) retorna un número directamente
+                        if isinstance(result, (int, float)):
+                            count = int(result)
+                        elif isinstance(result, dict):
                             count = result.get('count', 0) if 'count' in result else (1 if result else 0)
                         elif isinstance(result, tuple):
                             count = result[0] if result else 0
+                        elif result is None:
+                            count = 0
                         else:
-                            count = 1 if result else 0
+                            # Si es una lista, contar elementos
+                            count = len(result) if isinstance(result, list) else (1 if result else 0)
                         
                         if count == 0:
                             st.error("La contraseña actual es incorrecta.")
