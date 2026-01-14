@@ -102,8 +102,12 @@ def get_db_engine(_host, _port, _dbname, _user, _password):
     from urllib.parse import quote_plus
     
     # Debug: verificar que estamos usando el host correcto
-    if _host == 'localhost':
-        st.warning(f"⚠️ ADVERTENCIA: Se está usando 'localhost' en lugar del host de Supabase. Verifica los secrets.")
+    # Solo mostrar advertencia si realmente es localhost y no es intencional
+    if _host == 'localhost' and '.supabase.co' not in _host:
+        # No mostrar advertencia si estamos usando API REST (que no necesita host de BD)
+        api_config = get_supabase_api_config()
+        if not (api_config['url'] and api_config['key']):
+            st.warning(f"⚠️ ADVERTENCIA: Se está usando 'localhost' en lugar del host de Supabase. Verifica los secrets.")
     
     # Supabase: Usar conexión directa (db.xxx.supabase.co)
     host_para_conexion = _host
