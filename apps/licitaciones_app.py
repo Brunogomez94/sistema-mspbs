@@ -1261,42 +1261,52 @@ def iniciar_actualizacion_automatica():
     #         time.sleep(1)
     #         st.rerun()
 
-def obtener_esquemas_postgres():
-    """Obtiene la lista de esquemas existentes en Supabase, excluyendo esquemas del sistema"""
+def obtener_codigos_licitacion():
+    """Obtiene la lista de códigos de licitación únicos desde oxigeno.llamado"""
     try:
         api_config = get_supabase_api_config()
         engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return []
         
-        # Para API REST, no podemos obtener esquemas directamente
+        # Si es API REST, intentar obtener códigos desde la tabla
         if isinstance(engine, dict) and engine.get('type') == 'api_rest':
-            # Retornar lista vacía o esquemas conocidos
-            return []
+            client = engine['client']
+            try:
+                # Intentar obtener códigos únicos desde la tabla llamado
+                response = client.table('llamado').select('codigo_licitacion').execute()
+                if response.data:
+                    codigos = list(set([row.get('codigo_licitacion') for row in response.data if row.get('codigo_licitacion')]))
+                    return sorted(codigos)
+                return []
+            except Exception:
+                # Si falla, retornar lista vacía
+                return []
         
-        # Usar conexión directa para obtener esquemas
+        # Usar conexión directa para obtener códigos
         engine = safe_get_engine()
         if engine is None:
             return []
         
         with engine.connect() as conn:
             query = text("""
-                SELECT schema_name
-                FROM information_schema.schemata
-                WHERE schema_name NOT IN ('pg_catalog', 'information_schema', 'public', 'reactivos_py', 'siciap', 'pg_toast')
-                AND schema_name NOT LIKE 'pg_temp_%'
-                AND schema_name NOT LIKE 'pg_toast_temp_%'
-                ORDER BY schema_name
+                SELECT DISTINCT codigo_licitacion
+                FROM oxigeno.llamado
+                WHERE codigo_licitacion IS NOT NULL
+                ORDER BY codigo_licitacion
             """)
             
             result = conn.execute(query)
-            
-            esquemas = [row[0] for row in result]
-            return esquemas
+            codigos = [row[0] for row in result]
+            return codigos
     except Exception as e:
-        st.error(f"Error obteniendo esquemas: {e}")
+        # Si hay error, retornar lista vacía
         return []
+
+# Mantener función antigua por compatibilidad (deprecated)
+def obtener_esquemas_postgres():
+    """DEPRECATED: Usa obtener_codigos_licitacion() en su lugar"""
+    return obtener_codigos_licitacion()
 
 import openpyxl
 import pandas as pd
@@ -1505,13 +1515,13 @@ def cargar_archivo_con_configuracion(archivo_excel, nombre_archivo, esquema, con
                     descripcion=f"Archivo {nombre_archivo} cargado exitosamente",
                     detalles={
                         "archivo_id": archivo_id,
-                        "esquema": esquema_formateado,
+                        "codigo_licitacion": codigo_licitacion,
                         "resultados": resultados_carga
                     }
                 )
                 
                 # Crear mensaje de resultado
-                mensaje_exitoso = [f"✅ Archivo '{nombre_archivo}' cargado exitosamente en esquema '{esquema_formateado}'"]
+                mensaje_exitoso = [f"✅ Archivo '{nombre_archivo}' cargado exitosamente con código de licitación '{codigo_licitacion}'"]
                 mensaje_exitoso.append("📊 Resultados por hoja:")
                 for hoja, resultado in resultados_carga.items():
                     mensaje_exitoso.append(f"   • {hoja}: {resultado}")
@@ -1528,7 +1538,7 @@ def cargar_archivo_con_configuracion(archivo_excel, nombre_archivo, esquema, con
                     descripcion=f"Error cargando {nombre_archivo}: {str(e)}",
                     detalles={
                         "error": str(e),
-                        "esquema": esquema_formateado
+                        "codigo_licitacion": codigo_licitacion
                     }
                 )
                 
@@ -1650,41 +1660,51 @@ def cargar_archivo_a_postgres(archivo_excel, nombre_archivo, esquema, empresa_pa
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 
-                # 1. Crear el esquema (10%)
-                status_text.text("🔨 Creando esquema...")
-                conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{esquema_formateado}"'))
+                # 1. Asegurar que el esquema oxigeno existe (10%)
+                status_text.text("🔨 Verificando esquema oxigeno...")
+                conn.execute(text('CREATE SCHEMA IF NOT EXISTS oxigeno'))
                 progress_bar.progress(0.1)
                 
                 # 2. Cargar tabla 'llamado' (30%)
                 status_text.text("📋 Cargando tabla 'llamado'...")
                 df_llamado = excel_data['llamado']
-                crear_tabla_llamado(conn, esquema_formateado, df_llamado)
+                # Agregar codigo_licitacion al DataFrame
+                if 'codigo_licitacion' not in df_llamado.columns:
+                    df_llamado['codigo_licitacion'] = codigo_licitacion
+                crear_tabla_llamado(conn, 'oxigeno', df_llamado, codigo_licitacion)
                 progress_bar.progress(0.3)
                 
                 # 3. Cargar tabla 'ejecucion_general' (60%)
                 status_text.text(f"📊 Cargando tabla 'ejecucion_general' ({len(excel_data['ejecucion_general']):,} registros)...")
                 df_ejecucion_general = excel_data['ejecucion_general']
-                crear_tabla_ejecucion_general(conn, esquema_formateado, df_ejecucion_general)
+                # Agregar codigo_licitacion al DataFrame
+                if 'codigo_licitacion' not in df_ejecucion_general.columns:
+                    df_ejecucion_general['codigo_licitacion'] = codigo_licitacion
+                crear_tabla_ejecucion_general(conn, 'oxigeno', df_ejecucion_general, codigo_licitacion)
                 progress_bar.progress(0.6)
                 
                 # 4. Cargar tabla 'orden_de_compra' (85%)
                 status_text.text(f"🛒 Cargando tabla 'orden_de_compra' ({len(excel_data['orden_de_compra']):,} registros)...")
                 df_orden_compra = excel_data['orden_de_compra']
-                crear_tabla_orden_compra(conn, esquema_formateado, df_orden_compra)
+                # Agregar codigo_licitacion al DataFrame
+                if 'codigo_licitacion' not in df_orden_compra.columns:
+                    df_orden_compra['codigo_licitacion'] = codigo_licitacion
+                crear_tabla_orden_compra(conn, 'oxigeno', df_orden_compra, codigo_licitacion)
                 progress_bar.progress(0.85)
                 
                 # 5. Guardar registro del archivo en la tabla de control (95%)
                 status_text.text("💾 Guardando registro del archivo...")
                 query = text("""
                     INSERT INTO oxigeno.archivos_cargados 
-                    (nombre_archivo, esquema, usuario_id)
-                    VALUES (:nombre, :esquema, :usuario_id)
+                    (nombre_archivo, esquema, codigo_licitacion, usuario_id)
+                    VALUES (:nombre, :esquema, :codigo, :usuario_id)
                     RETURNING id
                 """)
                 
                 result = conn.execute(query, {
                     'nombre': nombre_archivo,
-                    'esquema': esquema_formateado,
+                    'esquema': 'oxigeno',  # Siempre oxigeno ahora
+                    'codigo': codigo_licitacion,
                     'usuario_id': st.session_state.user_id
                 })
                 
@@ -1785,12 +1805,14 @@ def crear_tabla_llamado(conn, esquema, df, codigo_licitacion):
         # Ya hay datos para este código, no insertar para evitar duplicados
         pass
 
-def crear_tabla_ejecucion_general(conn, esquema, df):
+def crear_tabla_ejecucion_general(conn, esquema, df, codigo_licitacion):
     """Crea la tabla ejecucion_general con su estructura específica
-    OPTIMIZADO: Carga en chunks para no congelar el navegador"""
-    # Crear tabla con nombres NORMALIZADOS
+    OPTIMIZADO: Carga en chunks para no congelar el navegador
+    Ahora usa esquema único oxigeno con columna codigo_licitacion"""
+    # Crear tabla con nombres NORMALIZADOS + codigo_licitacion
     create_sql = f'''
-    CREATE TABLE IF NOT EXISTS "{esquema}".ejecucion_general (
+    CREATE TABLE IF NOT EXISTS {esquema}.ejecucion_general (
+        codigo_licitacion VARCHAR(100) NOT NULL,
         "CODIGO_EMISOR" VARCHAR(50),
         "CODIGO_LICITACION" VARCHAR(50),
         "I_D" INTEGER,
@@ -1830,8 +1852,27 @@ def crear_tabla_ejecucion_general(conn, esquema, df):
     '''
     conn.execute(text(create_sql))
     
+    # Crear índice en codigo_licitacion para mejor rendimiento
+    try:
+        conn.execute(text(f'CREATE INDEX IF NOT EXISTS idx_ejecucion_codigo_licitacion ON {esquema}.ejecucion_general(codigo_licitacion)'))
+    except:
+        pass  # Si el índice ya existe, continuar
+    
+    # Verificar si ya hay datos para este código de licitación
+    check_query = text(f'SELECT COUNT(*) FROM {esquema}.ejecucion_general WHERE codigo_licitacion = :codigo')
+    result = conn.execute(check_query, {'codigo': codigo_licitacion})
+    count = result.scalar()
+    
+    if count > 0:
+        # Ya hay datos para este código, no insertar para evitar duplicados
+        return
+    
     # NORMALIZAR nombres de columnas
     df_clean = df.copy()
+    
+    # Asegurar que codigo_licitacion esté en el DataFrame
+    if 'codigo_licitacion' not in df_clean.columns:
+        df_clean['codigo_licitacion'] = codigo_licitacion
     
     # Crear un mapeo más robusto
     nuevas_columnas = []
@@ -1904,13 +1945,15 @@ def crear_tabla_ejecucion_general(conn, esquema, df):
                         if_exists='append', index=False, method=None)
 
 
-def crear_tabla_orden_compra(conn, esquema, df):
+def crear_tabla_orden_compra(conn, esquema, df, codigo_licitacion):
     """Crea la tabla orden_de_compra con su estructura específica
     OPTIMIZADO: Carga en chunks para no congelar el navegador
-    ACTUALIZADO: Con las columnas EXACTAS del Excel de Bruno"""
-    # Crear tabla con las columnas EXACTAS
+    ACTUALIZADO: Con las columnas EXACTAS del Excel de Bruno
+    Ahora usa esquema único oxigeno con columna codigo_licitacion"""
+    # Crear tabla con las columnas EXACTAS + codigo_licitacion
     create_sql = f'''
-    CREATE TABLE IF NOT EXISTS "{esquema}".orden_de_compra (
+    CREATE TABLE IF NOT EXISTS {esquema}.orden_de_compra (
+        codigo_licitacion VARCHAR(100) NOT NULL,
         "NUMERO_ORDEN_DE_COMPRA" VARCHAR(100),
         "FECHA_DE_EMISION" DATE,
         "CODIGO_DE_EMISION_DE_ORDEN_DE_COMPRA" VARCHAR(100),
@@ -3219,24 +3262,24 @@ def pagina_ver_cargas():
         st.info("No hay archivos cargados para mostrar.")
 
 def pagina_eliminar_esquemas():
-    """Página para eliminar esquemas (licitaciones)"""
+    """Página para eliminar licitaciones por código"""
     st.header("Eliminar Licitaciones")
     
     st.warning("⚠️ Advertencia: Esta operación eliminará permanentemente todos los datos asociados a la licitación seleccionada.")
     
-    # Obtener esquemas existentes
-    esquemas = obtener_esquemas_postgres()
+    # Obtener códigos de licitación existentes
+    codigos = obtener_codigos_licitacion()
     
-    if esquemas:
-        esquema_a_eliminar = st.selectbox(
+    if codigos:
+        codigo_a_eliminar = st.selectbox(
             "Seleccionar licitación a eliminar:",
-            options=esquemas
+            options=codigos
         )
         
         if st.button("Eliminar Licitación", type="primary", use_container_width=True):
             # Pedir confirmación
             if st.checkbox("Confirmo que deseo eliminar esta licitación permanentemente"):
-                success, message = eliminar_esquema_postgres(esquema_a_eliminar)
+                success, message = eliminar_licitacion(codigo_a_eliminar)
                 
                 if success:
                     st.success(message)
