@@ -88,9 +88,11 @@ def get_supabase_api_config():
     }
 
 @st.cache_resource
-def get_engine():
+def get_engine(_host=None, _port=None, _dbname=None, _user=None, _password=None, _api_url=None, _api_key=None):
     """
     Obtener engine de conexión - API REST primero, luego conexión directa
+    
+    Los parámetros con _ son para invalidar el cache cuando cambien los secrets
     
     Retorna:
     - Si API REST está disponible: dict con {'type': 'api_rest', 'client': supabase_client}
