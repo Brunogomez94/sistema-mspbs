@@ -3259,11 +3259,22 @@ def pagina_gestionar_proveedores():
             if isinstance(engine, dict) and engine.get('type') == 'api_rest':
                 client = engine['client']
                 try:
-                    # Intentar con diferentes nombres de tabla
-                    table_name = 'proveedores'  # Supabase API REST usa el nombre sin esquema
+                    # Intentar con diferentes nombres de tabla (similar a execute_query)
+                    # Supabase API REST solo expone 'public' por defecto
+                    # Para tablas en otros esquemas, intentar diferentes formatos
+                    table_names_to_try = ['proveedores', 'oxigeno_proveedores', 'oxigeno.proveedores']
                     
-                    # Obtener todos los proveedores
-                    response = client.table(table_name).select("*").execute()
+                    response = None
+                    for table_name in table_names_to_try:
+                        try:
+                            response = client.table(table_name).select("*").execute()
+                            break  # Si funciona, salir del loop
+                        except Exception:
+                            continue  # Intentar siguiente formato
+                    
+                    if response is None:
+                        st.warning("⚠️ No se pudo acceder a la tabla 'proveedores' con API REST. Asegúrate de que la tabla existe en el esquema 'public' o configura 'Exposed schemas' en Supabase para el esquema 'oxigeno'.")
+                        return
                     
                     if response.data:
                         # Aplicar filtros en Python
