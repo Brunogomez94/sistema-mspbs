@@ -97,24 +97,37 @@ def get_db_engine(_host, _port, _dbname, _user, _password):
             # Direct connection
             conn_str = f"postgresql://{_user}:{_password}@{_host}:{_port}/{_dbname}?sslmode=require"
         
-        # Forzar IPv4 resolviendo el hostname primero
-        import socket
+        # Configurar connect_args con SSL y forzar IPv4 si es posible
+        connect_args = {
+            "client_encoding": "utf8",
+            "connect_timeout": 10,
+            "sslmode": "require"
+        }
+        
+        # Intentar forzar IPv4 (evitar problemas de IPv6)
+        # Nota: En Streamlit Cloud, el DNS debería funcionar, pero si hay problemas
+        # de IPv6, psycopg2 intentará IPv4 automáticamente si IPv6 falla
         try:
-            # Resolver a IPv4 explícitamente
-            ipv4 = socket.gethostbyname(_host)
-            # Reemplazar hostname con IP en la cadena de conexión
-            conn_str = conn_str.replace(_host, ipv4)
-        except:
-            pass  # Si falla la resolución, usar el hostname original
+            import socket
+            # Obtener todas las direcciones IP del host
+            addr_info = socket.getaddrinfo(_host, _port, socket.AF_INET, socket.SOCK_STREAM)
+            if addr_info:
+                # Usar la primera dirección IPv4 encontrada
+                ipv4 = addr_info[0][4][0]
+                # Reemplazar hostname con IP en la cadena de conexión
+                conn_str = conn_str.replace(_host, ipv4)
+        except Exception:
+            # Si falla la resolución, usar el hostname original
+            # psycopg2 manejará la resolución
+            pass
         
         engine = create_engine(
             conn_str, 
-            connect_args={
-                "client_encoding": "utf8",
-                "connect_timeout": 10,
-                "sslmode": "require"
-            },
-            pool_pre_ping=True
+            connect_args=connect_args,
+            pool_pre_ping=True,
+            # Configuración adicional para mejorar la conexión
+            pool_size=5,
+            max_overflow=10
         )
         return engine
     except Exception as e:
