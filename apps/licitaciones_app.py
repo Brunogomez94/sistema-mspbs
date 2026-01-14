@@ -241,7 +241,18 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
     Returns:
         Resultado de la consulta según fetch_one/fetch_all
     """
-    engine = get_engine()
+    # Obtener configuración para invalidar cache
+    config = get_db_config_licitaciones()
+    api_config = get_supabase_api_config()
+    engine = get_engine(
+        _host=config['host'],
+        _port=config['port'],
+        _dbname=config['name'],
+        _user=config['user'],
+        _password=config['password'],
+        _api_url=api_config['url'],
+        _api_key=api_config['key']
+    )
     
     if engine is None:
         st.error("No se pudo conectar a la base de datos")
