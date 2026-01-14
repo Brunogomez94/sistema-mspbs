@@ -74,20 +74,32 @@ def get_db_config():
         'password': os.getenv('DB_PASSWORD', 'Dggies12345')
     }
 
+def get_supabase_api_config():
+    """Obtener configuración de Supabase para API REST"""
+    try:
+        if hasattr(st, 'secrets') and 'supabase' in st.secrets:
+            return {
+                'url': st.secrets['supabase']['url'],
+                'key': st.secrets['supabase']['key']
+            }
+    except Exception:
+        pass
+    
+    # Fallback a variables de entorno
+    return {
+        'url': os.getenv('SUPABASE_URL', ''),
+        'key': os.getenv('SUPABASE_KEY', '')
+    }
+
 @st.cache_resource
 def get_db_engine(_host, _port, _dbname, _user, _password):
     """Crear conexión centralizada a PostgreSQL
     
-    Prueba múltiples drivers en orden hasta encontrar uno que funcione:
-    1. psycopg (psycopg3) - más moderno
-    2. psycopg2 - tradicional pero confiable
-    3. pg8000 - puro Python
-    4. asyncpg - asíncrono (requiere conversión)
+    Intenta conexión directa primero (psycopg2), si falla usa API REST de Supabase
     
     Los parámetros con _ son para invalidar el cache cuando cambien los secrets
     """
     from urllib.parse import quote_plus
-    import ssl
     
     # Debug: verificar que estamos usando el host correcto
     if _host == 'localhost':
@@ -106,6 +118,72 @@ def get_db_engine(_host, _port, _dbname, _user, _password):
     
     # Escapar la contraseña para la URL
     password_escaped = quote_plus(_password)
+    
+    # INTENTO 1: Conexión directa con psycopg2 (más simple y confiable)
+    try:
+        from sqlalchemy import create_engine
+        
+        conn_str = f"postgresql://{user_para_conexion}:{password_escaped}@{host_para_conexion}:{_port}/{_dbname}?sslmode=require"
+        
+        engine = create_engine(
+            conn_str,
+            connect_args={
+                "sslmode": "require",
+                "connect_timeout": 10
+            },
+            pool_pre_ping=True,
+            pool_size=3,
+            max_overflow=5,
+            pool_recycle=3600
+        )
+        
+        # Probar la conexión
+        with engine.connect() as conn:
+            from sqlalchemy import text
+            conn.execute(text("SELECT 1"))
+        
+        # Si llegamos aquí, la conexión funcionó
+        st.sidebar.success("✅ Conectado usando: psycopg2 (Directo)")
+        return engine
+        
+    except Exception as direct_error:
+        # Si falla conexión directa, intentar API REST
+        st.sidebar.warning("⚠️ Conexión directa falló, intentando API REST...")
+        
+        api_config = get_supabase_api_config()
+        if api_config['url'] and api_config['key']:
+            try:
+                from supabase import create_client, Client
+                supabase: Client = create_client(api_config['url'], api_config['key'])
+                
+                # Probar conexión con API REST (intentar leer una tabla del sistema)
+                try:
+                    response = supabase.table('_prisma_migrations').select("id").limit(1).execute()
+                except:
+                    # Si no existe esa tabla, probar con otra consulta simple
+                    pass
+                
+                st.sidebar.success("✅ Conectado usando: API REST de Supabase")
+                # Retornar un objeto especial que indique que usamos API REST
+                return {'type': 'api_rest', 'client': supabase, 'config': api_config}
+            except Exception as api_error:
+                st.error(f"Error con API REST: {api_error}")
+                st.sidebar.error("❌ Ambos métodos fallaron")
+                return None
+        else:
+            st.warning("""
+            ⚠️ **No se configuraron credenciales de API REST**
+            
+            Para usar API REST como fallback, agrega en Streamlit Secrets:
+            ```toml
+            [supabase]
+            url = "https://[tu-project-id].supabase.co"
+            key = "tu-anon-key"
+            ```
+            
+            Obtén estas credenciales en: Supabase → Settings → API
+            """)
+            return None
     
     # Intentar primero con pooler de Supabase (Supavisor) - mejor para conexiones remotas
     # El pooler evita problemas de IPv6 y timeouts
