@@ -201,6 +201,8 @@ def safe_get_engine():
     """
     Obtener engine seguro: si es API REST, intenta conexión directa como fallback
     Retorna: SQLAlchemy engine (nunca dict de API REST)
+    IMPORTANTE: Esta función es solo para operaciones que REQUIEREN conexión directa.
+    Para operaciones que pueden usar API REST (como login), usar get_engine() directamente.
     """
     engine = get_engine()
     
@@ -213,6 +215,7 @@ def safe_get_engine():
         if direct_engine:
             return direct_engine
         # Si falla conexión directa, retornar None
+        # PERO NO mostrar error aquí, porque puede que la operación pueda usar API REST
         return None
     
     # Si ya es conexión directa, retornarla
