@@ -6,7 +6,7 @@ CREATE SCHEMA IF NOT EXISTS oxigeno;
 
 -- Crear tabla de usuarios
 CREATE TABLE IF NOT EXISTS oxigeno.usuarios (
-    id SERIAL PRIMARY KEY,
+    id INTEGER NOT NULL,
     cedula VARCHAR(20) NOT NULL,
     username VARCHAR(50) NOT NULL,
     password VARCHAR(200) NOT NULL,
@@ -14,9 +14,15 @@ CREATE TABLE IF NOT EXISTS oxigeno.usuarios (
     role VARCHAR(20) NOT NULL DEFAULT 'user',
     fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     ultimo_cambio_password TIMESTAMP,
+    CONSTRAINT usuarios_pkey PRIMARY KEY (id),
     CONSTRAINT usuarios_cedula_unique UNIQUE (cedula),
     CONSTRAINT usuarios_username_unique UNIQUE (username)
 );
+
+-- Crear secuencia para el ID si no existe
+CREATE SEQUENCE IF NOT EXISTS oxigeno.usuarios_id_seq;
+ALTER TABLE oxigeno.usuarios ALTER COLUMN id SET DEFAULT nextval('oxigeno.usuarios_id_seq');
+ALTER SEQUENCE oxigeno.usuarios_id_seq OWNED BY oxigeno.usuarios.id;
 
 -- Crear usuario admin por defecto (solo si no existe)
 -- Contraseña: admin (hash SHA256)
