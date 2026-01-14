@@ -195,15 +195,22 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
                         # Remover comillas si las hay y manejar esquemas
                         table_name = table_part.replace('"', '').replace("'", "")
                         
-                        # En Supabase API REST, los esquemas se manejan como parte del nombre de tabla
-                        # oxigeno.usuarios -> oxigeno_usuarios o simplemente usuarios si está en el esquema público
-                        # Intentar primero con el nombre completo, luego sin esquema
-                        table_names_to_try = [table_name]
+                        # En Supabase API REST, las tablas con esquemas pueden necesitar formato especial
+                        # Intentar diferentes variantes del nombre de tabla
+                        table_names_to_try = []
                         if '.' in table_name:
-                            # También intentar sin el esquema (asumiendo que está en public)
-                            table_names_to_try.append(table_name.split('.')[-1])
-                            # Y con guion bajo (algunos sistemas usan esto)
-                            table_names_to_try.append(table_name.replace('.', '_'))
+                            schema, table = table_name.split('.', 1)
+                            # Variantes a probar:
+                            # 1. Nombre completo con punto (puede funcionar en algunos casos)
+                            table_names_to_try.append(table_name)
+                            # 2. Solo el nombre de la tabla (si está en public)
+                            table_names_to_try.append(table)
+                            # 3. Con guion bajo (formato común)
+                            table_names_to_try.append(f"{schema}_{table}")
+                            # 4. Con el esquema como prefijo sin punto
+                            table_names_to_try.append(f"{schema}{table}")
+                        else:
+                            table_names_to_try.append(table_name)
                         
                         # Extraer columnas
                         select_part = parts[0].replace('select', '').strip()
