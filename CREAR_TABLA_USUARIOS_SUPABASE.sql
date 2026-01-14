@@ -7,26 +7,29 @@ CREATE SCHEMA IF NOT EXISTS oxigeno;
 -- Crear tabla de usuarios
 CREATE TABLE IF NOT EXISTS oxigeno.usuarios (
     id SERIAL PRIMARY KEY,
-    cedula VARCHAR(20) UNIQUE NOT NULL,
-    username VARCHAR(50) UNIQUE NOT NULL,
+    cedula VARCHAR(20) NOT NULL,
+    username VARCHAR(50) NOT NULL,
     password VARCHAR(200) NOT NULL,
     nombre_completo VARCHAR(100) NOT NULL,
     role VARCHAR(20) NOT NULL DEFAULT 'user',
     fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    ultimo_cambio_password TIMESTAMP
+    ultimo_cambio_password TIMESTAMP,
+    CONSTRAINT usuarios_cedula_unique UNIQUE (cedula),
+    CONSTRAINT usuarios_username_unique UNIQUE (username)
 );
 
--- Crear usuario admin por defecto
+-- Crear usuario admin por defecto (solo si no existe)
 -- Contraseña: admin (hash SHA256)
 INSERT INTO oxigeno.usuarios (cedula, username, password, nombre_completo, role)
-VALUES (
+SELECT 
     '123456', 
     'admin', 
     '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918', 
     'Administrador', 
     'admin'
-)
-ON CONFLICT (username) DO NOTHING;
+WHERE NOT EXISTS (
+    SELECT 1 FROM oxigeno.usuarios WHERE username = 'admin'
+);
 
 -- IMPORTANTE: Para que la API REST de Supabase pueda acceder a esta tabla,
 -- necesitas configurar el esquema 'oxigeno' en Supabase Dashboard:
