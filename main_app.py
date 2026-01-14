@@ -225,6 +225,41 @@ def get_db_engine(_host, _port, _dbname, _user, _password):
     
     # Si llegamos aquí, ningún driver funcionó
     error_msg = f"Error: Ningún driver funcionó. Último error: {last_error}"
+    
+    # Mostrar información de diagnóstico
+    with st.expander("🔍 Información de Diagnóstico", expanded=True):
+        st.markdown("""
+        **Problema:** Todos los drivers fallaron con timeout.
+        
+        **Posibles causas:**
+        1. ⚠️ Streamlit Cloud puede estar bloqueando conexiones salientes al puerto 5432
+        2. ⚠️ El hostname no se resuelve correctamente en Streamlit Cloud
+        3. ⚠️ Firewall o restricciones de red
+        
+        **Soluciones recomendadas:**
+        1. ✅ Verifica que Streamlit Cloud tenga acceso a internet
+        2. ✅ Considera usar la **API REST de Supabase** en lugar de conexión directa
+        3. ✅ Verifica que el host y credenciales sean correctos
+        
+        **Para usar API REST de Supabase:**
+        - Necesitas la URL de tu proyecto: `https://[project-id].supabase.co`
+        - Necesitas la API Key (anon key) de Supabase
+        - Usa la biblioteca `supabase-py` que ya está instalada
+        """)
+        
+        if '.supabase.co' in _host:
+            st.info(f"""
+            **Tu configuración actual:**
+            - Host: `{_host}`
+            - Usuario: `{user_para_conexion}`
+            - Puerto: `{_port}`
+            
+            **Para obtener tus credenciales de API REST:**
+            1. Ve a tu proyecto en Supabase
+            2. Settings → API
+            3. Copia la "Project URL" y "anon public" key
+            """)
+    
     st.error(error_msg)
     st.sidebar.error(f"❌ Todos los drivers fallaron")
     return None
