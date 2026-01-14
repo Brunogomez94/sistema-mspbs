@@ -45,11 +45,21 @@ def get_db_config():
     """Obtiene configuración de BD desde secrets o variables de entorno"""
     try:
         if hasattr(st, 'secrets') and 'db_config' in st.secrets:
+            user = st.secrets['db_config']['user']
+            # Si el usuario no tiene el formato postgres.INSTANCE_ID, intentar agregarlo
+            # El instance_id es la parte antes de .supabase.co en el host
+            if '.' not in user and 'host' in st.secrets['db_config']:
+                host = st.secrets['db_config']['host']
+                # Extraer instance_id del host (ej: db.otblgsembluynkoalivq.supabase.co -> otblgsembluynkoalivq)
+                if '.supabase.co' in host:
+                    instance_id = host.split('.')[1] if host.startswith('db.') else host.split('.')[0]
+                    user = f"postgres.{instance_id}"
+            
             return {
                 'host': st.secrets['db_config']['host'],
                 'port': int(st.secrets['db_config']['port']),
                 'dbname': st.secrets['db_config']['dbname'],
-                'user': st.secrets['db_config']['user'],
+                'user': user,
                 'password': st.secrets['db_config']['password']
             }
     except Exception:
@@ -77,9 +87,26 @@ def get_db_engine(_host, _port, _dbname, _user, _password):
         if _host == 'localhost':
             st.warning(f"⚠️ ADVERTENCIA: Se está usando 'localhost' en lugar del host de Supabase. Verifica los secrets.")
         
-        # Supabase requiere SSL - usar parámetros en la URL
-        conn_str = f"postgresql://{_user}:{_password}@{_host}:{_port}/{_dbname}?sslmode=require"
-        # Forzar IPv4 y agregar timeout
+        # Supabase requiere SSL y el usuario debe ser postgres.INSTANCE_ID
+        # Usar pooler en modo session para evitar problemas de transaction pooling
+        # Si el host tiene .pooler., usar session mode, si no usar direct connection
+        if '.pooler.' in _host or 'pooler' in _host:
+            # Connection pooling - usar session mode
+            conn_str = f"postgresql://{_user}:{_password}@{_host}:{_port}/{_dbname}?sslmode=require&pgbouncer=true"
+        else:
+            # Direct connection
+            conn_str = f"postgresql://{_user}:{_password}@{_host}:{_port}/{_dbname}?sslmode=require"
+        
+        # Forzar IPv4 resolviendo el hostname primero
+        import socket
+        try:
+            # Resolver a IPv4 explícitamente
+            ipv4 = socket.gethostbyname(_host)
+            # Reemplazar hostname con IP en la cadena de conexión
+            conn_str = conn_str.replace(_host, ipv4)
+        except:
+            pass  # Si falla la resolución, usar el hostname original
+        
         engine = create_engine(
             conn_str, 
             connect_args={
@@ -87,7 +114,7 @@ def get_db_engine(_host, _port, _dbname, _user, _password):
                 "connect_timeout": 10,
                 "sslmode": "require"
             },
-            pool_pre_ping=True  # Verificar conexión antes de usar
+            pool_pre_ping=True
         )
         return engine
     except Exception as e:
