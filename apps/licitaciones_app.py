@@ -5868,9 +5868,21 @@ def main():
         if engine is None:
             st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        st.sidebar.success(f"✅ Conectado a PostgreSQL | Usuario: {st.session_state.username}")
+        
+        # Verificar conexión según el tipo
+        if isinstance(engine, dict) and engine.get('type') == 'api_rest':
+            # Para API REST, solo verificar que el cliente existe
+            client = engine.get('client')
+            if client:
+                st.sidebar.success(f"✅ Conectado a Supabase API REST | Usuario: {st.session_state.username}")
+            else:
+                st.sidebar.error("❌ Cliente de API REST no disponible")
+                return
+        else:
+            # Para conexión directa (si existe)
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            st.sidebar.success(f"✅ Conectado a Supabase | Usuario: {st.session_state.username}")
         
         # ⚠️ INDICADOR DE ACTUALIZACIÓN AUTOMÁTICA DESACTIVADO
         # Se desactivó para mejorar el rendimiento del navegador
@@ -7773,10 +7785,20 @@ def pagina_ordenes_compra():
         
         if esquema_seleccionado:
             # Obtener información de la licitación
-            engine = get_engine()
+            api_config = get_supabase_api_config()
+            engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
             if engine is None:
                 st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
                 return
+            
+            # Si es API REST, usar conexión directa como fallback para consultas complejas
+            if isinstance(engine, dict) and engine.get('type') == 'api_rest':
+                # Intentar obtener conexión directa para esta operación
+                engine = safe_get_engine()
+                if engine is None:
+                    st.warning("⚠️ Esta operación requiere conexión directa. No disponible en este momento.")
+                    return
+            
             with engine.connect() as conn:
                 try:
                     query = text(f"""
