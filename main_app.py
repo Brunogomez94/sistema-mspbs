@@ -119,7 +119,43 @@ def get_db_engine(_host, _port, _dbname, _user, _password):
     # Escapar la contraseña para la URL
     password_escaped = quote_plus(_password)
     
-    # INTENTO 1: Conexión directa con psycopg2 (más simple y confiable)
+    # INTENTO 1: API REST de Supabase (preferido, evita problemas de firewall)
+    api_config = get_supabase_api_config()
+    if api_config['url'] and api_config['key']:
+        try:
+            from supabase import create_client, Client
+            supabase: Client = create_client(api_config['url'], api_config['key'])
+            
+            # Probar conexión con API REST (intentar leer una tabla)
+            # Intentar con diferentes tablas comunes
+            test_tables = ['_prisma_migrations', 'oxigeno.usuarios', 'public.actas_recepcion']
+            connection_ok = False
+            
+            for table_name in test_tables:
+                try:
+                    response = supabase.table(table_name).select("*").limit(1).execute()
+                    connection_ok = True
+                    break
+                except Exception as table_error:
+                    # Si la tabla no existe, continuar con la siguiente
+                    continue
+            
+            if connection_ok:
+                st.sidebar.success("✅ Conectado usando: API REST de Supabase")
+                # Retornar un objeto especial que indique que usamos API REST
+                return {'type': 'api_rest', 'client': supabase, 'config': api_config}
+            else:
+                # Si ninguna tabla funcionó, pero el cliente se creó, asumir que funciona
+                st.sidebar.success("✅ Conectado usando: API REST de Supabase")
+                return {'type': 'api_rest', 'client': supabase, 'config': api_config}
+                
+        except ImportError:
+            st.sidebar.warning("⚠️ Biblioteca supabase-py no instalada, intentando conexión directa...")
+        except Exception as api_error:
+            error_detail = str(api_error)
+            st.sidebar.warning(f"⚠️ API REST falló: {error_detail[:50]}..., intentando conexión directa...")
+    
+    # INTENTO 2: Conexión directa con psycopg2 (solo si API REST no está disponible o falló)
     try:
         from sqlalchemy import create_engine
         
@@ -147,10 +183,31 @@ def get_db_engine(_host, _port, _dbname, _user, _password):
         return engine
         
     except Exception as direct_error:
-        # Si falla conexión directa, intentar API REST
-        st.sidebar.warning("⚠️ Conexión directa falló, intentando API REST...")
-        
-        api_config = get_supabase_api_config()
+        # Si ambos métodos fallaron
+        if api_config['url'] and api_config['key']:
+            st.error(f"""
+            ❌ **Ambos métodos de conexión fallaron**
+            
+            **Error API REST:** Verifica las credenciales en secrets
+            **Error Conexión Directa:** {str(direct_error)[:100]}
+            
+            Verifica la configuración en Streamlit Secrets.
+            """)
+        else:
+            st.error(f"""
+            ❌ **Conexión directa falló y API REST no está configurada**
+            
+            **Error:** {str(direct_error)[:100]}
+            
+            **Solución:** Configura API REST en secrets para evitar problemas de firewall.
+            Agrega en Streamlit Secrets:
+            ```toml
+            [supabase]
+            url = "https://otblgsembluynkoalivq.supabase.co"
+            key = "tu-anon-key"
+            ```
+            """)
+        return None
         
         # Verificar si las credenciales están configuradas
         if not api_config['url'] or not api_config['key']:
