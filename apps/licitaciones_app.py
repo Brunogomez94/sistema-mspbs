@@ -219,10 +219,15 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
                         # Remover comillas si las hay y manejar esquemas
                         table_name = table_part.replace('"', '').replace("'", "")
                         
-                        # En Supabase API REST, las tablas con esquemas se acceden SIN el esquema
+                        # En Supabase API REST, las tablas con esquemas expuestos se acceden SIN el esquema
                         # IMPORTANTE: La API REST solo accede a tablas en 'public' por defecto
-                        # Para tablas en otros esquemas, necesitas configurar "Exposed schemas" en Supabase
-                        # O mover la tabla al esquema 'public'
+                        # Para tablas en otros esquemas (oxigeno, siciap), necesitas configurar 
+                        # "Exposed schemas" en Supabase → Settings → API → Exposed schemas
+                        # 
+                        # Cuando un esquema está expuesto, las tablas se acceden así:
+                        # - oxigeno.proveedores → proveedores (si oxigeno está expuesto)
+                        # - siciap.ordenes → ordenes (si siciap está expuesto)
+                        # - public.usuarios → usuarios (public siempre está expuesto)
                         table_names_to_try = []
                         if '.' in table_name:
                             schema, table = table_name.split('.', 1)
@@ -230,12 +235,11 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
                             if schema.lower() == 'public':
                                 table_names_to_try.append(table)  # usuarios
                             else:
-                                # Para otros esquemas, intentar primero solo el nombre de la tabla
-                                table_names_to_try.append(table)  # usuarios
-                                # Luego con guion bajo
-                                table_names_to_try.append(f"{schema}_{table}")  # oxigeno_usuarios
-                                # Y finalmente el nombre completo
-                                table_names_to_try.append(table_name)  # oxigeno.usuarios
+                                # Para esquemas expuestos (oxigeno, siciap), usar solo el nombre de la tabla
+                                # Esto funciona si configuraste "Exposed schemas" en Supabase
+                                table_names_to_try.append(table)  # proveedores (de oxigeno.proveedores)
+                                # Fallback: intentar con guion bajo (por si acaso)
+                                table_names_to_try.append(f"{schema}_{table}")  # oxigeno_proveedores
                         else:
                             table_names_to_try.append(table_name)
                         
