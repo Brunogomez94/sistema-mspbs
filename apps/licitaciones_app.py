@@ -1324,8 +1324,14 @@ def cargar_archivo_con_configuracion(archivo_excel, nombre_archivo, esquema, con
         if hojas_faltantes:
             return False, f"Faltan hojas requeridas: {', '.join(hojas_faltantes)}"
         
-        # Formatear el nombre del esquema
-        esquema_formateado = esquema.strip().lower().replace(' ', '_').replace('-', '_')
+        # Generar código de licitación único
+        # Formato: {MODALIDAD}_{NUMERO}/{AÑO} (ej: LPN_100/2023)
+        # Si el esquema ya viene en formato de código, usarlo; si no, generarlo
+        if '/' in esquema or '_' in esquema:
+            codigo_licitacion = esquema.strip().upper()
+        else:
+            # Si viene como "lpn 100/2023", convertir a "LPN_100/2023"
+            codigo_licitacion = esquema.strip().upper().replace(' ', '_')
         
         # Registrar actividad de carga
         registrar_actividad(
@@ -1334,7 +1340,7 @@ def cargar_archivo_con_configuracion(archivo_excel, nombre_archivo, esquema, con
             descripcion=f"Iniciando carga de {nombre_archivo} con {len(hojas_a_procesar)} hojas",
             detalles={
                 "archivo": nombre_archivo,
-                "esquema": esquema_formateado,
+                "codigo_licitacion": codigo_licitacion,
                 "hojas_incluidas": list(hojas_a_procesar.keys()),
                 "limpiar_datos": limpiar_datos,
                 "validar_estructura": validar_estructura
@@ -1387,8 +1393,8 @@ def cargar_archivo_con_configuracion(archivo_excel, nombre_archivo, esquema, con
             # Iniciar transacción
             trans = conn.begin()
             try:
-                # 1. Crear el esquema si no existe
-                conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{esquema_formateado}"'))
+                # 1. Asegurar que el esquema oxigeno existe (ya no creamos esquemas dinámicos)
+                conn.execute(text('CREATE SCHEMA IF NOT EXISTS oxigeno'))
                 
                 # 2. Procesar cada hoja incluida
                 resultados_carga = {}
@@ -1440,17 +1446,21 @@ def cargar_archivo_con_configuracion(archivo_excel, nombre_archivo, esquema, con
                                 resultados_carga[nombre_hoja] = f"❌ Sin columnas después del mapeo"
                                 continue
                         
-                        # Cargar según el tipo de hoja
+                        # Agregar columna codigo_licitacion a todos los DataFrames
+                        if 'codigo_licitacion' not in df.columns:
+                            df['codigo_licitacion'] = codigo_licitacion
+                        
+                        # Cargar según el tipo de hoja (ahora en esquema oxigeno)
                         if nombre_hoja == 'llamado':
-                            crear_tabla_llamado(conn, esquema_formateado, df)
+                            crear_tabla_llamado(conn, 'oxigeno', df, codigo_licitacion)
                         elif nombre_hoja == 'ejecucion_general':
-                            crear_tabla_ejecucion_general(conn, esquema_formateado, df)
+                            crear_tabla_ejecucion_general(conn, 'oxigeno', df, codigo_licitacion)
                         elif nombre_hoja == 'orden_de_compra':
-                            crear_tabla_orden_compra(conn, esquema_formateado, df)
+                            crear_tabla_orden_compra(conn, 'oxigeno', df, codigo_licitacion)
                         else:
-                            # Para hojas no estándar, crear tabla genérica
+                            # Para hojas no estándar, crear tabla genérica en oxigeno
                             df.to_sql(nombre_hoja.lower().replace(' ', '_'), conn, 
-                                    schema=esquema_formateado, if_exists='replace', 
+                                    schema='oxigeno', if_exists='append', 
                                     index=False, method=None)
                         
                         # Registrar resultado con información del mapeo
@@ -1709,11 +1719,13 @@ def cargar_archivo_a_postgres(archivo_excel, nombre_archivo, esquema, empresa_pa
     except Exception as e:
         return False, f"Error al cargar archivo Excel: {e}"
 
-def crear_tabla_llamado(conn, esquema, df):
-    """Crea la tabla llamado con su estructura específica y acepta todas las variantes de columnas"""
-    # Crear tabla con TODAS las columnas (incluida CODIGO_LLAMADO)
+def crear_tabla_llamado(conn, esquema, df, codigo_licitacion):
+    """Crea la tabla llamado con su estructura específica y acepta todas las variantes de columnas
+    Ahora usa esquema único oxigeno con columna codigo_licitacion"""
+    # Crear tabla con TODAS las columnas (incluida CODIGO_LLAMADO) + codigo_licitacion
     create_sql = f'''
-    CREATE TABLE IF NOT EXISTS "{esquema}".llamado (
+    CREATE TABLE IF NOT EXISTS {esquema}.llamado (
+        codigo_licitacion VARCHAR(100) NOT NULL,
         "CODIGO_LLAMADO" VARCHAR(50),
         "I_D" INTEGER,
         "MODALIDAD" VARCHAR(20),
@@ -1730,6 +1742,12 @@ def crear_tabla_llamado(conn, esquema, df):
     )
     '''
     conn.execute(text(create_sql))
+    
+    # Crear índice en codigo_licitacion para mejor rendimiento
+    try:
+        conn.execute(text(f'CREATE INDEX IF NOT EXISTS idx_llamado_codigo_licitacion ON {esquema}.llamado(codigo_licitacion)'))
+    except:
+        pass  # Si el índice ya existe, continuar
     
     # MAPEO: Normalizar nombres de columnas con ESPACIOS a nombres con GUIONES
     mapeo_columnas = {}
@@ -1752,16 +1770,19 @@ def crear_tabla_llamado(conn, esquema, df):
     # Limpiar y cargar datos
     df_clean = df_clean.fillna('')
     
-    # Verificar si ya hay datos en la tabla llamado
-    check_query = text(f'SELECT COUNT(*) FROM "{esquema}".llamado')
-    result = conn.execute(check_query)
+    # Verificar si ya hay datos para este código de licitación
+    check_query = text(f'SELECT COUNT(*) FROM {esquema}.llamado WHERE codigo_licitacion = :codigo')
+    result = conn.execute(check_query, {'codigo': codigo_licitacion})
     count = result.scalar()
     
     if count == 0:
-        # Solo insertar si la tabla está vacía
+        # Solo insertar si no hay datos para este código de licitación
+        # Asegurar que codigo_licitacion esté en el DataFrame
+        if 'codigo_licitacion' not in df_clean.columns:
+            df_clean['codigo_licitacion'] = codigo_licitacion
         df_clean.to_sql('llamado', conn, schema=esquema, if_exists='append', index=False, method='multi')
     else:
-        # Ya hay datos, no insertar para evitar duplicados
+        # Ya hay datos para este código, no insertar para evitar duplicados
         pass
 
 def crear_tabla_ejecucion_general(conn, esquema, df):
