@@ -256,47 +256,62 @@ class PostgresConnection:
         self.engine = None
 
     def connect(self):
-        try:
-            if USE_PG8000:
-                # Usar pg8000 - mejor compatibilidad con Supabase
-                from urllib.parse import quote_plus
-                import ssl
-                password_escaped = quote_plus(self.password)
-                connection_string = f"postgresql+pg8000://{self.user}:{password_escaped}@{self.host}:{self.port}/{self.dbname}"
-                # Configurar SSL context para pg8000
-                ssl_context = ssl.create_default_context()
-                ssl_context.check_hostname = False
-                ssl_context.verify_mode = ssl.CERT_NONE
+        """Conectar usando múltiples drivers hasta encontrar uno que funcione"""
+        from urllib.parse import quote_plus
+        import ssl
+        
+        password_escaped = quote_plus(self.password)
+        
+        # Lista de drivers a probar en orden
+        drivers_to_try = [
+            {
+                'name': 'psycopg (psycopg3)',
+                'dialect': 'postgresql+psycopg',
+                'connect_args': {'sslmode': 'require', 'connect_timeout': 10}
+            },
+            {
+                'name': 'psycopg2',
+                'dialect': 'postgresql',
+                'connect_args': {'sslmode': 'require', 'connect_timeout': 10}
+            },
+            {
+                'name': 'pg8000',
+                'dialect': 'postgresql+pg8000',
+                'connect_args': {
+                    'ssl_context': ssl.create_default_context(),
+                    'timeout': 10
+                }
+            }
+        ]
+        
+        last_error = None
+        for driver in drivers_to_try:
+            try:
+                connection_string = f"{driver['dialect']}://{self.user}:{password_escaped}@{self.host}:{self.port}/{self.dbname}"
                 self.engine = create_engine(
                     connection_string,
-                    connect_args={"ssl_context": ssl_context, "timeout": 10}
+                    connect_args=driver['connect_args']
                 )
-                # Para pg8000, usar el engine directamente
-                self.conn = self.engine.connect()
-            else:
-                # Fallback a psycopg2
-                self.conn = psycopg2.connect(
-                    host=self.host,
-                    port=self.port,
-                    dbname=self.dbname,
-                    user=self.user,
-                    password=self.password,
-                    sslmode='require'
-                )
-                self.conn.autocommit = True
                 
-                # Conexión con SQLAlchemy para pandas to_sql
-                connection_string = f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.dbname}?sslmode=require"
-                self.engine = create_engine(
-                    connection_string,
-                    connect_args={"sslmode": "require"}
-                )
-            
-            logger.info("Conexión a PostgreSQL establecida correctamente")
-            return True
-        except Exception as e:
-            logger.error(f"Error al conectar a PostgreSQL: {str(e)}")
-            return False
+                # Probar conexión
+                with self.engine.connect() as conn:
+                    from sqlalchemy import text
+                    conn.execute(text("SELECT 1"))
+                
+                # Si llegamos aquí, funcionó
+                self.conn = self.engine.connect()
+                logger.info(f"Conexión establecida usando: {driver['name']}")
+                return True
+                
+            except ImportError:
+                continue
+            except Exception as e:
+                last_error = e
+                continue
+        
+        # Si llegamos aquí, todos fallaron
+        logger.error(f"Error al conectar: {last_error}")
+        return False
     
     def test_connection(self):
         if self.conn is None:

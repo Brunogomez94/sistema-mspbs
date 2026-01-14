@@ -78,65 +78,104 @@ def get_db_config():
 def get_db_engine(_host, _port, _dbname, _user, _password):
     """Crear conexión centralizada a PostgreSQL
     
+    Prueba múltiples drivers en orden hasta encontrar uno que funcione:
+    1. psycopg (psycopg3) - más moderno
+    2. psycopg2 - tradicional pero confiable
+    3. pg8000 - puro Python
+    4. asyncpg - asíncrono (requiere conversión)
+    
     Los parámetros con _ son para invalidar el cache cuando cambien los secrets
     """
-    try:
-        from sqlalchemy import create_engine
-        
-        # Debug: verificar que estamos usando el host correcto
-        if _host == 'localhost':
-            st.warning(f"⚠️ ADVERTENCIA: Se está usando 'localhost' en lugar del host de Supabase. Verifica los secrets.")
-        
-        # Supabase: Usar conexión directa (db.xxx.supabase.co)
-        # El pooler requiere configuración específica de región y puede fallar
-        # Mejor usar conexión directa con mejor manejo de IPv6/IPv4
-        host_para_conexion = _host
-        user_para_conexion = _user
-        
-        # Asegurar que el usuario tenga el formato correcto para Supabase
-        if '.supabase.co' in _host:
-            instance_id = _host.split('.')[1] if _host.startswith('db.') else _host.split('.')[0]
-            # El usuario debe ser: postgres.INSTANCE_ID
-            if not user_para_conexion.startswith(f'postgres.{instance_id}'):
-                user_para_conexion = f"postgres.{instance_id}"
-        
-        # Usar pg8000 en lugar de psycopg2 para mejor compatibilidad con Supabase
-        # pg8000 es un driver puro de Python que maneja mejor IPv6/IPv4
-        # Cambiar el dialecto de postgresql a postgresql+pg8000
-        from urllib.parse import quote_plus
-        import ssl
-        
-        # Escapar la contraseña para la URL
-        password_escaped = quote_plus(_password)
-        
-        # Construir cadena de conexión usando pg8000
-        # pg8000 usa el formato: postgresql+pg8000://
-        conn_str = f"postgresql+pg8000://{user_para_conexion}:{password_escaped}@{host_para_conexion}:{_port}/{_dbname}"
-        
-        # Configurar connect_args con SSL para pg8000
-        # pg8000 requiere ssl_context en lugar de ssl
-        ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
-        
-        connect_args = {
-            "ssl_context": ssl_context,
-            "timeout": 10
+    from urllib.parse import quote_plus
+    import ssl
+    
+    # Debug: verificar que estamos usando el host correcto
+    if _host == 'localhost':
+        st.warning(f"⚠️ ADVERTENCIA: Se está usando 'localhost' en lugar del host de Supabase. Verifica los secrets.")
+    
+    # Supabase: Usar conexión directa (db.xxx.supabase.co)
+    host_para_conexion = _host
+    user_para_conexion = _user
+    
+    # Asegurar que el usuario tenga el formato correcto para Supabase
+    if '.supabase.co' in _host:
+        instance_id = _host.split('.')[1] if _host.startswith('db.') else _host.split('.')[0]
+        # El usuario debe ser: postgres.INSTANCE_ID
+        if not user_para_conexion.startswith(f'postgres.{instance_id}'):
+            user_para_conexion = f"postgres.{instance_id}"
+    
+    # Escapar la contraseña para la URL
+    password_escaped = quote_plus(_password)
+    
+    # Lista de drivers a probar en orden de preferencia
+    drivers_to_try = [
+        {
+            'name': 'psycopg (psycopg3)',
+            'dialect': 'postgresql+psycopg',
+            'connect_args': {
+                'sslmode': 'require',
+                'connect_timeout': 10
+            }
+        },
+        {
+            'name': 'psycopg2',
+            'dialect': 'postgresql',
+            'connect_args': {
+                'sslmode': 'require',
+                'connect_timeout': 10
+            }
+        },
+        {
+            'name': 'pg8000',
+            'dialect': 'postgresql+pg8000',
+            'connect_args': {
+                'ssl_context': ssl.create_default_context(),
+                'timeout': 10
+            }
         }
-        
-        # Crear engine con pg8000
-        engine = create_engine(
-            conn_str, 
-            connect_args=connect_args,
-            pool_pre_ping=True,
-            pool_size=3,
-            max_overflow=5,
-            pool_recycle=3600
-        )
-        return engine
-    except Exception as e:
-        st.error(f"Error creando engine: {e}")
-        return None
+    ]
+    
+    # Intentar cada driver hasta que uno funcione
+    last_error = None
+    for driver in drivers_to_try:
+        try:
+            from sqlalchemy import create_engine
+            
+            # Construir cadena de conexión
+            conn_str = f"{driver['dialect']}://{user_para_conexion}:{password_escaped}@{host_para_conexion}:{_port}/{_dbname}"
+            
+            # Crear engine con el driver actual
+            engine = create_engine(
+                conn_str,
+                connect_args=driver['connect_args'],
+                pool_pre_ping=True,
+                pool_size=3,
+                max_overflow=5,
+                pool_recycle=3600
+            )
+            
+            # Probar la conexión
+            with engine.connect() as conn:
+                from sqlalchemy import text
+                conn.execute(text("SELECT 1"))
+            
+            # Si llegamos aquí, la conexión funcionó
+            st.sidebar.success(f"✅ Conectado usando: {driver['name']}")
+            return engine
+            
+        except ImportError:
+            # Driver no instalado, probar siguiente
+            continue
+        except Exception as e:
+            # Driver instalado pero falló la conexión
+            last_error = e
+            continue
+    
+    # Si llegamos aquí, ningún driver funcionó
+    error_msg = f"Error: Ningún driver funcionó. Último error: {last_error}"
+    st.error(error_msg)
+    st.sidebar.error(f"❌ Todos los drivers fallaron")
+    return None
 
 def verificar_conexion_db():
     """Verificar estado de la conexión a la base de datos"""
