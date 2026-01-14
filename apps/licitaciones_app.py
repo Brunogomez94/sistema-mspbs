@@ -29,7 +29,7 @@ def get_db_config_licitaciones():
                 if 'db_config' in secrets:
                     return {
                         'host': secrets['db_config']['host'],
-                        'port': secrets['db_config']['port'],
+                        'port': int(secrets['db_config']['port']),
                         'name': secrets['db_config']['dbname'],
                         'user': secrets['db_config']['user'],
                         'password': secrets['db_config']['password']
