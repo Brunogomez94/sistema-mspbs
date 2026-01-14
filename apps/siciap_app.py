@@ -202,15 +202,6 @@ def sincronizar_datosejecucion(conn):
         conn.conn.rollback()
         return False
 
-# Configuración fija de PostgreSQL
-DB_CONFIG = {
-    'host': 'localhost',
-    'port': 5432,
-    'dbname': 'postgres',
-    'user': 'postgres',
-    'password': 'Dggies12345'
-}
-
 # Tablas predefinidas - Ahora definidas a nivel global
 TABLES = {
     'ordenes': 'siciap.ordenes',
@@ -219,9 +210,30 @@ TABLES = {
     'pedidos': 'siciap.pedidos'
 }
 
-# Función para obtener la configuración de la BD
+# Función para obtener la configuración de la BD desde secrets o variables de entorno
 def get_db_config():
-    return DB_CONFIG
+    """Obtiene configuración de BD desde secrets o variables de entorno"""
+    try:
+        if hasattr(st, 'secrets') and 'db_config' in st.secrets:
+            return {
+                'host': st.secrets['db_config']['host'],
+                'port': int(st.secrets['db_config']['port']),
+                'dbname': st.secrets['db_config']['dbname'],
+                'user': st.secrets['db_config']['user'],
+                'password': st.secrets['db_config']['password']
+            }
+    except Exception:
+        pass
+    
+    # Fallback a variables de entorno o valores por defecto
+    import os
+    return {
+        'host': os.getenv('DB_HOST', 'localhost'),
+        'port': int(os.getenv('DB_PORT', '5432')),
+        'dbname': os.getenv('DB_NAME', 'postgres'),
+        'user': os.getenv('DB_USER', 'postgres'),
+        'password': os.getenv('DB_PASSWORD', 'Dggies12345')
+    }
 
 # Clase para manejar la conexión a PostgreSQL
 class PostgresConnection:
@@ -3655,18 +3667,8 @@ if st.sidebar.button("Probar Conexión", key="global_test_conn"):
     else:
         st.sidebar.error("❌ No se pudo conectar a PostgreSQL")
 
-def get_db_config():
-    """
-    Devuelve la configuración para conectarse a la base de datos PostgreSQL.
-    Modifica los valores según tu configuración.
-    """
-    return {
-        'user': 'postgres',      # Nombre de usuario de PostgreSQL
-        'password': 'Dggies12345',  # Contraseña de PostgreSQL
-        'host': 'localhost',     # Host donde se ejecuta PostgreSQL (generalmente localhost)
-        'port': '5432',  # Puerto por defecto de PostgreSQL
-        'dbname': 'postgres'       # Nombre de la base de datos
-    }
+# Esta función está duplicada, usar la función get_db_config() definida arriba
+# Se mantiene por compatibilidad pero ahora usa la configuración unificada
 
 def test_db_connection():
     """

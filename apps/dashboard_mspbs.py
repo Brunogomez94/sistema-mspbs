@@ -76,19 +76,35 @@ st.markdown("""
 st.title("📊 TABLERO DGGIES - DGL - TIENDA VIRTUAL DNCP")
 st.markdown("🔄 **Sistema de actualización automática cada 30 minutos** | Dashboard se refresca cada 30 segundos")
 
-# Configuración BD (misma que el script de carga)
-DB_CONFIG = {
-    'host': 'localhost',
-    'database': 'postgres',
-    'user': 'postgres', 
-    'password': 'Dggies12345',
-    'port': 5432
-}
+# Configuración BD - Lee de secrets o variables de entorno
+def get_db_config_dashboard():
+    """Obtiene configuración de BD desde secrets o variables de entorno"""
+    try:
+        if hasattr(st, 'secrets') and 'db_config' in st.secrets:
+            return {
+                'host': st.secrets['db_config']['host'],
+                'port': int(st.secrets['db_config']['port']),
+                'database': st.secrets['db_config']['dbname'],
+                'user': st.secrets['db_config']['user'],
+                'password': st.secrets['db_config']['password']
+            }
+    except Exception:
+        pass
+    
+    # Fallback a variables de entorno o valores por defecto
+    return {
+        'host': os.getenv('DB_HOST', 'localhost'),
+        'port': int(os.getenv('DB_PORT', '5432')),
+        'database': os.getenv('DB_NAME', 'postgres'),
+        'user': os.getenv('DB_USER', 'postgres'),
+        'password': os.getenv('DB_PASSWORD', 'Dggies12345')
+    }
 
 @st.cache_resource
 def get_engine():
     try:
-        conn_str = f"postgresql://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
+        config = get_db_config_dashboard()
+        conn_str = f"postgresql://{config['user']}:{config['password']}@{config['host']}:{config['port']}/{config['database']}"
         engine = create_engine(conn_str, connect_args={"client_encoding": "utf8"})
         return engine
     except Exception as e:
