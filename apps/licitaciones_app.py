@@ -1226,7 +1226,13 @@ def obtener_esquemas_postgres():
         engine = get_engine()
         if engine is None:
             st.error("No se pudo conectar a la base de datos")
-            return
+            return []
+        
+        # Para API REST, no podemos obtener esquemas directamente
+        if isinstance(engine, dict) and engine.get('type') == 'api_rest':
+            # Retornar lista vacía o esquemas conocidos
+            return []
+        
         with engine.connect() as conn:
             query = text("""
                 SELECT schema_name
@@ -1291,7 +1297,13 @@ def cargar_archivo_con_configuracion(archivo_excel, nombre_archivo, esquema, con
         engine = get_engine()
         if engine is None:
             st.error("No se pudo conectar a la base de datos")
-            return
+            return False, "No se pudo conectar a la base de datos"
+        
+        # Para API REST, las operaciones de carga de archivos requieren conexión directa
+        if isinstance(engine, dict) and engine.get('type') == 'api_rest':
+            st.error("La carga de archivos Excel requiere conexión directa a PostgreSQL. La API REST no soporta esta operación.")
+            return False, "API REST no soporta carga de archivos Excel"
+        
         with engine.connect() as conn:
             # Iniciar transacción
             trans = conn.begin()
@@ -1502,7 +1514,13 @@ def cargar_archivo_a_postgres(archivo_excel, nombre_archivo, esquema, empresa_pa
         engine = get_engine()
         if engine is None:
             st.error("No se pudo conectar a la base de datos")
-            return
+            return False, "No se pudo conectar a la base de datos"
+        
+        # Para API REST, las operaciones de carga de archivos requieren conexión directa
+        if isinstance(engine, dict) and engine.get('type') == 'api_rest':
+            st.error("La carga de archivos Excel requiere conexión directa a PostgreSQL. La API REST no soporta esta operación.")
+            return False, "API REST no soporta carga de archivos Excel"
+        
         with engine.connect() as conn:
             # Iniciar transacción
             trans = conn.begin()
@@ -1910,7 +1928,13 @@ def obtener_archivos_cargados():
         engine = get_engine()
         if engine is None:
             st.error("No se pudo conectar a la base de datos")
-            return
+            return []
+        
+        # Para API REST, usar execute_query
+        if isinstance(engine, dict) and engine.get('type') == 'api_rest':
+            # Por ahora, retornar lista vacía (se puede implementar con API REST más adelante)
+            return []
+        
         with engine.connect() as conn:
             query = text("""
                 SELECT DISTINCT ON (ac.esquema) 
@@ -1946,7 +1970,13 @@ def eliminar_esquema_postgres(esquema):
         engine = get_engine()
         if engine is None:
             st.error("No se pudo conectar a la base de datos")
-            return
+            return False, "No se pudo conectar a la base de datos"
+        
+        # Para API REST, las operaciones de eliminación de esquemas requieren conexión directa
+        if isinstance(engine, dict) and engine.get('type') == 'api_rest':
+            st.error("La eliminación de esquemas requiere conexión directa a PostgreSQL. La API REST no soporta esta operación.")
+            return False, "API REST no soporta eliminación de esquemas"
+        
         with engine.connect() as conn:
             # Iniciar transacción
             trans = conn.begin()
@@ -5121,6 +5151,12 @@ def pagina_dashboard():
         if engine is None:
             st.error("No se pudo conectar a la base de datos")
             return
+        
+        # Para API REST, el dashboard requiere conexión directa
+        if isinstance(engine, dict) and engine.get('type') == 'api_rest':
+            st.warning("El dashboard completo requiere conexión directa a PostgreSQL. Algunas funcionalidades pueden estar limitadas.")
+            return
+        
         with engine.connect() as conn:
             resultados_detalle = []
 
