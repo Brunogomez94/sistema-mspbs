@@ -204,19 +204,30 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
                         table_names_to_try = []
                         if '.' in table_name:
                             schema, table = table_name.split('.', 1)
-                            # Intentar primero solo el nombre de la tabla (más común)
-                            table_names_to_try.append(table)  # usuarios
-                            # Luego con guion bajo
-                            table_names_to_try.append(f"{schema}_{table}")  # oxigeno_usuarios
-                            # Y finalmente el nombre completo
-                            table_names_to_try.append(table_name)  # oxigeno.usuarios
+                            # Si el esquema es 'public', usar solo el nombre de la tabla
+                            if schema.lower() == 'public':
+                                table_names_to_try.append(table)  # usuarios
+                            else:
+                                # Para otros esquemas, intentar primero solo el nombre de la tabla
+                                table_names_to_try.append(table)  # usuarios
+                                # Luego con guion bajo
+                                table_names_to_try.append(f"{schema}_{table}")  # oxigeno_usuarios
+                                # Y finalmente el nombre completo
+                                table_names_to_try.append(table_name)  # oxigeno.usuarios
                         else:
                             table_names_to_try.append(table_name)
                         
                         # Extraer columnas
                         select_part = parts[0].replace('select', '').strip()
-                        columns = [col.strip().replace('"', '').replace("'", "") for col in select_part.split(',')]
-                        columns_str = ','.join(columns)
+                        # Manejar COUNT(*) como caso especial
+                        is_count = 'count(*)' in select_part.lower() or select_part.strip() == 'count(*)'
+                        
+                        if is_count:
+                            # Para COUNT(*), necesitamos obtener todos los resultados y contar
+                            columns_str = '*'  # Seleccionar todas las columnas para contar
+                        else:
+                            columns = [col.strip().replace('"', '').replace("'", "") for col in select_part.split(',')]
+                            columns_str = ','.join(columns)
                         
                         # Aplicar filtros si hay WHERE
                         filters = {}
@@ -253,6 +264,13 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
                                 
                                 # Ejecutar
                                 response = supabase_query.execute()
+                                
+                                # Si es COUNT(*), retornar el número de resultados
+                                if is_count:
+                                    count = len(response.data) if response.data else 0
+                                    if fetch_one:
+                                        return {'count': count} if isinstance(fetch_one, bool) else count
+                                    return count
                                 
                                 if fetch_one:
                                     return response.data[0] if response.data else None
