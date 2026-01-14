@@ -259,7 +259,8 @@ class PostgresConnection:
             self.conn.autocommit = True  # Para crear esquemas
             
             # Conexión con SQLAlchemy para pandas to_sql
-            connection_string = f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.dbname}"
+            # Supabase requiere SSL
+            connection_string = f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.dbname}?sslmode=require"
             self.engine = create_engine(connection_string)
             
             logger.info("Conexión a PostgreSQL establecida correctamente")
