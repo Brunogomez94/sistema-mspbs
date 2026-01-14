@@ -88,86 +88,45 @@ def get_supabase_api_config():
     }
 
 @st.cache_resource
-def get_engine(_host=None, _port=None, _dbname=None, _user=None, _password=None, _api_url=None, _api_key=None):
+def get_engine(_api_url=None, _api_key=None):
     """
-    Obtener engine de conexión - API REST primero, luego conexión directa
+    Obtener cliente de Supabase API REST
     
     Los parámetros con _ son para invalidar el cache cuando cambien los secrets
     
     Retorna:
     - Si API REST está disponible: dict con {'type': 'api_rest', 'client': supabase_client}
-    - Si conexión directa funciona: SQLAlchemy engine
-    - Si ambos fallan: None
+    - Si falla: None
     """
-    from urllib.parse import quote_plus
-    
-    config = get_db_config_licitaciones()
-    host = config['host']
-    port = config['port']
-    dbname = config['name']
-    user = config['user']
-    password = config['password']
-    
-    # Asegurar formato correcto de usuario para Supabase
-    if '.supabase.co' in host:
-        instance_id = host.split('.')[1] if host.startswith('db.') else host.split('.')[0]
-        if not user.startswith(f'postgres.{instance_id}'):
-            user = f"postgres.{instance_id}"
-    
-    # INTENTO 1: API REST de Supabase (preferido)
+    # SOLO API REST - NO más conexión directa a PostgreSQL
     api_config = get_supabase_api_config()
     if api_config['url'] and api_config['key']:
         try:
             from supabase import create_client, Client
             supabase: Client = create_client(api_config['url'], api_config['key'])
             
-            # Probar conexión - si falla, no es crítico, seguimos intentando
+            # Probar conexión básica
             try:
-                # Intentar con 'usuarios' (en public) primero, luego otras opciones
-                for table_name in ['usuarios', 'oxigeno_usuarios', 'oxigeno.usuarios']:
-                    try:
-                        response = supabase.table(table_name).select("id").limit(1).execute()
-                        # Si funciona, retornar API REST
-                        return {'type': 'api_rest', 'client': supabase, 'config': api_config}
-                    except Exception as e:
-                        # Continuar con siguiente tabla
-                        continue
-                # Si ninguna tabla funcionó, aún así retornar API REST (puede que la tabla no exista aún)
+                # Intentar con 'usuarios' (en public) primero
+                response = supabase.table('usuarios').select("id").limit(1).execute()
                 return {'type': 'api_rest', 'client': supabase, 'config': api_config}
-            except Exception as e:
-                # Si hay error en la prueba, aún así retornar API REST
+            except Exception:
+                # Si falla, aún así retornar API REST (puede que la tabla no exista aún)
                 return {'type': 'api_rest', 'client': supabase, 'config': api_config}
         except ImportError:
-            # Si no está instalado supabase, continuar con conexión directa
-            pass
+            st.error("⚠️ La librería 'supabase' no está instalada. Ejecuta: pip install supabase")
+            return None
         except Exception as e:
-            # Si hay error, continuar con conexión directa
-            pass
+            st.error(f"⚠️ Error conectando a Supabase API REST: {e}")
+            return None
     
-    # INTENTO 2: Conexión directa
-    try:
-        password_escaped = quote_plus(password)
-        conn_str = f"postgresql://{user}:{password_escaped}@{host}:{port}/{dbname}?sslmode=require"
-        engine = create_engine(
-            conn_str,
-            connect_args={
-                "client_encoding": "utf8",
-                "connect_timeout": 10,
-                "sslmode": "require"
-            },
-            pool_pre_ping=True
-        )
-        # Probar conexión
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        return engine
-    except Exception:
-        return None
+    st.error("⚠️ Configuración de Supabase API REST no encontrada. Verifica los secrets.")
+    return None
 
 def get_direct_connection():
     """
-    Obtener conexión directa a PostgreSQL
-    Si estamos usando API REST, intenta crear una conexión directa como fallback
+    Obtener conexión directa a PostgreSQL (DEPRECADO - Solo para operaciones que lo requieren)
+    Esta función solo se usa para operaciones que NO se pueden hacer con API REST
     Retorna: SQLAlchemy engine o None si falla
     """
     from urllib.parse import quote_plus
@@ -201,32 +160,18 @@ def get_direct_connection():
         with engine.connect() as test_conn:
             test_conn.execute(text("SELECT 1"))
         return engine
-    except Exception:
+    except Exception as e:
+        # No mostrar error aquí, solo retornar None
         return None
 
 def safe_get_engine():
     """
-    Obtener engine seguro: si es API REST, intenta conexión directa como fallback
-    Retorna: SQLAlchemy engine (nunca dict de API REST)
-    IMPORTANTE: Esta función es solo para operaciones que REQUIEREN conexión directa.
-    Para operaciones que pueden usar API REST (como login), usar get_engine() directamente.
+    Obtener conexión directa para operaciones que NO se pueden hacer con API REST
+    (como carga de archivos Excel, creación de esquemas, etc.)
+    Retorna: SQLAlchemy engine o None si falla
     """
-    engine = get_engine()
-    
-    if engine is None:
-        return None
-    
-    # Si es API REST, intentar conexión directa
-    if isinstance(engine, dict) and engine.get('type') == 'api_rest':
-        direct_engine = get_direct_connection()
-        if direct_engine:
-            return direct_engine
-        # Si falla conexión directa, retornar None
-        # PERO NO mostrar error aquí, porque puede que la operación pueda usar API REST
-        return None
-    
-    # Si ya es conexión directa, retornarla
-    return engine
+    # Intentar conexión directa solo si es necesario
+    return get_direct_connection()
 
 def execute_query(query, params=None, fetch_one=False, fetch_all=False):
     """
@@ -242,20 +187,14 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
         Resultado de la consulta según fetch_one/fetch_all
     """
     # Obtener configuración para invalidar cache
-    config = get_db_config_licitaciones()
     api_config = get_supabase_api_config()
     engine = get_engine(
-        _host=config['host'],
-        _port=config['port'],
-        _dbname=config['name'],
-        _user=config['user'],
-        _password=config['password'],
         _api_url=api_config['url'],
         _api_key=api_config['key']
     )
     
     if engine is None:
-        st.error("No se pudo conectar a la base de datos")
+        st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
         return None
     
     # Si es API REST
@@ -787,9 +726,10 @@ def formatear_columnas_tabla(df, mapeo_columnas=None):
 def configurar_tabla_usuarios():
     """Crea la tabla de usuarios si no existe - compatible con API REST y conexión directa"""
     try:
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return
         
         # Si es API REST, no podemos crear tablas directamente
@@ -1198,9 +1138,10 @@ def registrar_actividad(accion, modulo, descripcion, detalles=None, esquema_afec
 def obtener_historial_actividades(limite=100, usuario_id=None, modulo=None, accion=None, fecha_desde=None, fecha_hasta=None):
     """Obtiene el historial de actividades con filtros opcionales"""
     try:
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return []
         
         # Para API REST, la auditoría se puede implementar más adelante
@@ -1314,9 +1255,10 @@ def iniciar_actualizacion_automatica():
 def obtener_esquemas_postgres():
     """Obtiene la lista de esquemas existentes en PostgreSQL, excluyendo esquemas del sistema"""
     try:
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return []
         
         # Para API REST, no podemos obtener esquemas directamente
@@ -1390,9 +1332,10 @@ def cargar_archivo_con_configuracion(archivo_excel, nombre_archivo, esquema, con
             }
         )
         
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return False, "No se pudo conectar a la base de datos"
         
         # Si es API REST, intentar obtener conexión directa como fallback
@@ -1638,9 +1581,10 @@ def cargar_archivo_a_postgres(archivo_excel, nombre_archivo, esquema, empresa_pa
         # =====================================================
         # PASO 4: CARGAR A BASE DE DATOS CON PROGRESO
         # =====================================================
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return False, "No se pudo conectar a la base de datos"
         
         # Si es API REST, intentar obtener conexión directa como fallback
@@ -2083,9 +2027,10 @@ def crear_tabla_orden_compra(conn, esquema, df):
 def obtener_archivos_cargados():
     """Obtiene la lista de archivos cargados con su estado actual - SOLO ACTIVOS Y ÚNICOS"""
     try:
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return []
         
         # Para API REST, usar execute_query
@@ -2125,9 +2070,10 @@ def obtener_archivos_cargados():
 def eliminar_esquema_postgres(esquema):
     """Elimina un esquema de PostgreSQL y actualiza la tabla de cargas"""
     try:
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return False, "No se pudo conectar a la base de datos"
         
         # Si es API REST, intentar obtener conexión directa como fallback
@@ -2213,11 +2159,12 @@ def pagina_login():
                 password_hash = hashlib.sha256(password.encode()).hexdigest()
                 
                 try:
-                    # Obtener engine
-                    engine = get_engine()
+                    # Obtener engine (solo API REST)
+                    api_config = get_supabase_api_config()
+                    engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
                     
                     if engine is None:
-                        st.error("No se pudo conectar a la base de datos. Verifique la configuración.")
+                        st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
                         return
                     
                     # Si es API REST, usar directamente
@@ -4696,9 +4643,10 @@ def pagina_cambiar_password():
 def obtener_datos_items(esquema, servicio=None):
     """Obtiene los datos de los items disponibles para generar órdenes de compra"""
     try:
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return
         with engine.connect() as conn:
             # Consulta para obtener items disponibles desde ejecucion_general
@@ -4766,9 +4714,10 @@ def obtener_datos_items(esquema, servicio=None):
 def obtener_servicios_beneficiarios(esquema):
     """Obtiene la lista de servicios beneficiarios para un esquema"""
     try:
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return
         with engine.connect() as conn:
             query = text(f"""
@@ -4792,9 +4741,10 @@ def obtener_proximo_numero_oc(esquema, year=None):
     El parámetro 'year' se mantiene por compatibilidad pero no se usa
     """
     try:
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return
         with engine.connect() as conn:
             # Buscar el número máximo actual (extrae solo dígitos)
@@ -4841,9 +4791,10 @@ def crear_orden_compra(esquema, numero_orden, fecha_emision, servicio_beneficiar
         tuple: (success, message, orden_id)
     """
     try:
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return
         with engine.connect() as conn:
             # Iniciar transacción
@@ -4992,9 +4943,10 @@ def pagina_dashboard():
         return nombre
     
     try:
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return
         with engine.connect() as conn:
             for esquema in esquemas:
@@ -5071,9 +5023,10 @@ def pagina_dashboard():
     
     # Obtener datos consolidados CON MONTOS
     try:
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return
         with engine.connect() as conn:
             datos_consolidados = []
@@ -5365,9 +5318,10 @@ def pagina_dashboard():
 
     # Usar filtro global
     try:
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return
         
         # Si es API REST, intentar obtener conexión directa como fallback
@@ -5537,9 +5491,10 @@ def pagina_dashboard():
     
     # Usar filtro global
     try:
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return
         with engine.connect() as conn:
             ordenes_compra = []
@@ -5906,9 +5861,10 @@ def main():
     
     # Si llega aquí, el usuario está autenticado
     try:
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
@@ -6004,9 +5960,10 @@ def obtener_ordenes_compra(esquema=None):
         if esquema:
             esquemas = [esquema]
         
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return
         with engine.connect() as conn:
             for esq in esquemas:
@@ -6065,9 +6022,10 @@ def obtener_detalles_orden_compra(orden_id):
         esquema = partes[0]
         numero_orden = partes[1]
         
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return
         with engine.connect() as conn:
             # Obtener todas las líneas de la orden
@@ -6146,9 +6104,10 @@ def obtener_detalles_orden_compra(orden_id):
 def cambiar_estado_orden_compra(orden_id, nuevo_estado):
     """Cambia el estado de una orden de compra"""
     try:
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return
         with engine.connect() as conn:
             query = text("""
@@ -6355,9 +6314,10 @@ def generar_pdf_orden_compra(esquema, numero_oc, anio_oc, fecha_emision, servici
         story.append(Spacer(1, 0.15*cm))
         
         # Obtener datos de licitación
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return
         with engine.connect() as conn:
             query = text(f"""
@@ -6617,9 +6577,10 @@ def generar_numero_acta():
     try:
         anio_actual = datetime.now().year
         
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return
         with engine.connect() as conn:
             # Obtener el último número del año
@@ -6669,9 +6630,10 @@ def guardar_acta_recepcion(esquema, numero_orden, numero_acta, fecha_recepcion,
         
         items_json = decimal_to_float(items_recibidos)
         
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return
         with engine.connect() as conn:
             # Verificar si el número de acta ya existe
@@ -6731,9 +6693,10 @@ def guardar_acta_recepcion(esquema, numero_orden, numero_acta, fecha_recepcion,
 def obtener_actas_orden(esquema, numero_orden=None):
     """Obtiene todas las actas de una orden, o todas las actas del esquema si numero_orden es None"""
     try:
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return
         with engine.connect() as conn:
             if numero_orden:
@@ -6762,9 +6725,10 @@ def obtener_actas_orden(esquema, numero_orden=None):
 def obtener_acta_por_id(acta_id):
     """Obtiene datos completos de un acta"""
     try:
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return
         with engine.connect() as conn:
             query = text("""
@@ -6788,9 +6752,10 @@ def modificar_acta_recepcion(acta_id, numero_acta, fecha_recepcion, fecha_emisio
     try:
         import json
         
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return
         with engine.connect() as conn:
             query = text("""
@@ -6952,9 +6917,10 @@ def generar_pdf_acta_recepcion(esquema, numero_oc, fecha_recepcion, servicio, em
         story = []
         
         # Obtener datos de licitación
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return
         with engine.connect() as conn:
             query = text(f"""
@@ -8793,9 +8759,10 @@ def obtener_servicios_disponibles():
     """Obtiene lista de servicios únicos de todas las licitaciones"""
     servicios = set()
     try:
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return
         with engine.connect() as conn:
             esquemas = obtener_esquemas_postgres()
@@ -8819,9 +8786,10 @@ def obtener_servicios_disponibles():
 def asignar_servicio_usuario(usuario_id, servicio, puede_oc=True, puede_acta=True):
     """Asigna un servicio a un usuario con permisos específicos"""
     try:
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return
         with engine.connect() as conn:
             query = text("""
@@ -8848,9 +8816,10 @@ def asignar_servicio_usuario(usuario_id, servicio, puede_oc=True, puede_acta=Tru
 def obtener_servicios_usuario(usuario_id):
     """Obtiene los servicios asignados a un usuario"""
     try:
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return
         with engine.connect() as conn:
             query = text("""
@@ -8874,9 +8843,10 @@ def obtener_servicios_usuario(usuario_id):
 def quitar_servicio_usuario(usuario_id, servicio):
     """Elimina la asignación de un servicio a un usuario"""
     try:
-        engine = get_engine()
+        api_config = get_supabase_api_config()
+        engine = get_engine(_api_url=api_config['url'], _api_key=api_config['key'])
         if engine is None:
-            st.error("No se pudo conectar a la base de datos")
+            st.error("⚠️ No se pudo conectar a Supabase API REST. Verifica la configuración en secrets.")
             return
         with engine.connect() as conn:
             query = text("""
