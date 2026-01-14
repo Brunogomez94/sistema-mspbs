@@ -121,13 +121,15 @@ def get_engine():
             
             # Probar conexión
             try:
-                response = supabase.table('oxigeno.usuarios').select("id").limit(1).execute()
+                # Intentar con 'usuarios' (en public) primero, luego otras opciones
+                for table_name in ['usuarios', 'oxigeno_usuarios', 'oxigeno.usuarios']:
+                    try:
+                        response = supabase.table(table_name).select("id").limit(1).execute()
+                        break
+                    except:
+                        continue
             except:
-                # Si no existe esa tabla, intentar otra
-                try:
-                    response = supabase.table('_prisma_migrations').select("id").limit(1).execute()
-                except:
-                    pass
+                pass
             
             return {'type': 'api_rest', 'client': supabase, 'config': api_config}
         except ImportError:
@@ -694,7 +696,7 @@ def configurar_tabla_usuarios():
         # Solo verificar si existe y mostrar mensaje
         if isinstance(engine, dict) and engine.get('type') == 'api_rest':
             client = engine['client']
-            # Intentar acceder a la tabla para verificar si existe
+                # Intentar acceder a la tabla para verificar si existe
             try:
                 # Probar diferentes formatos de nombre de tabla
                 for table_name in ['usuarios', 'oxigeno_usuarios', 'oxigeno.usuarios']:
@@ -710,26 +712,32 @@ def configurar_tabla_usuarios():
                 
                 **Para crear la tabla:**
                 1. Ve a Supabase → SQL Editor
-                2. Ejecuta el siguiente SQL:
+                2. Ejecuta el script: `CREAR_TABLA_USUARIOS_SUPABASE.sql`
+                3. Luego ejecuta: `MOVER_TABLA_A_PUBLIC.sql` para moverla al esquema public
                 
+                O ejecuta directamente:
                 ```sql
-                CREATE SCHEMA IF NOT EXISTS oxigeno;
-                
-                CREATE TABLE IF NOT EXISTS oxigeno.usuarios (
-                    id SERIAL PRIMARY KEY,
-                    cedula VARCHAR(20) UNIQUE NOT NULL,
-                    username VARCHAR(50) UNIQUE NOT NULL,
+                CREATE TABLE IF NOT EXISTS public.usuarios (
+                    id INTEGER NOT NULL,
+                    cedula VARCHAR(20) NOT NULL,
+                    username VARCHAR(50) NOT NULL,
                     password VARCHAR(200) NOT NULL,
                     nombre_completo VARCHAR(100) NOT NULL,
                     role VARCHAR(20) NOT NULL DEFAULT 'user',
                     fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    ultimo_cambio_password TIMESTAMP
+                    ultimo_cambio_password TIMESTAMP,
+                    CONSTRAINT usuarios_pkey PRIMARY KEY (id),
+                    CONSTRAINT usuarios_cedula_unique UNIQUE (cedula),
+                    CONSTRAINT usuarios_username_unique UNIQUE (username)
                 );
                 
-                -- Crear usuario admin por defecto
-                INSERT INTO oxigeno.usuarios (cedula, username, password, nombre_completo, role)
-                VALUES ('123456', 'admin', '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918', 'Administrador', 'admin')
-                ON CONFLICT (username) DO NOTHING;
+                CREATE SEQUENCE IF NOT EXISTS usuarios_id_seq;
+                ALTER TABLE public.usuarios ALTER COLUMN id SET DEFAULT nextval('usuarios_id_seq');
+                ALTER SEQUENCE usuarios_id_seq OWNED BY public.usuarios.id;
+                
+                INSERT INTO public.usuarios (cedula, username, password, nombre_completo, role)
+                SELECT '123456', 'admin', '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918', 'Administrador', 'admin'
+                WHERE NOT EXISTS (SELECT 1 FROM public.usuarios WHERE username = 'admin');
                 ```
                 
                 La contraseña por defecto del admin es: `admin`
@@ -746,22 +754,34 @@ def configurar_tabla_usuarios():
             """))
             conn.commit()
             
+            # Crear tabla en public para que funcione con API REST
             conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS oxigeno.usuarios (
-                    id SERIAL PRIMARY KEY,
-                    cedula VARCHAR(20) UNIQUE NOT NULL,
-                    username VARCHAR(50) UNIQUE NOT NULL,
+                CREATE TABLE IF NOT EXISTS public.usuarios (
+                    id INTEGER NOT NULL,
+                    cedula VARCHAR(20) NOT NULL,
+                    username VARCHAR(50) NOT NULL,
                     password VARCHAR(200) NOT NULL,
                     nombre_completo VARCHAR(100) NOT NULL,
                     role VARCHAR(20) NOT NULL DEFAULT 'user',
                     fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    ultimo_cambio_password TIMESTAMP
+                    ultimo_cambio_password TIMESTAMP,
+                    CONSTRAINT usuarios_pkey PRIMARY KEY (id),
+                    CONSTRAINT usuarios_cedula_unique UNIQUE (cedula),
+                    CONSTRAINT usuarios_username_unique UNIQUE (username)
                 );
             """))
             conn.commit()
             
+            # Crear secuencia si no existe
+            conn.execute(text("""
+                CREATE SEQUENCE IF NOT EXISTS usuarios_id_seq;
+                ALTER TABLE public.usuarios ALTER COLUMN id SET DEFAULT nextval('usuarios_id_seq');
+                ALTER SEQUENCE usuarios_id_seq OWNED BY public.usuarios.id;
+            """))
+            conn.commit()
+            
             # Verificar si existe el usuario admin
-            query = text("SELECT COUNT(*) FROM oxigeno.usuarios WHERE username = 'admin'")
+            query = text("SELECT COUNT(*) FROM public.usuarios WHERE username = 'admin'")
             result = conn.execute(query)
             count = result.scalar()
             
@@ -770,8 +790,8 @@ def configurar_tabla_usuarios():
                 password_hash = hashlib.sha256("admin".encode()).hexdigest()
                 
                 query = text("""
-                    INSERT INTO oxigeno.usuarios (cedula, username, password, nombre_completo, role, ultimo_cambio_password)
-                    VALUES ('0000000', 'admin', :password, 'Administrador del Sistema', 'admin', CURRENT_TIMESTAMP)
+                    INSERT INTO public.usuarios (cedula, username, password, nombre_completo, role, ultimo_cambio_password)
+                    VALUES ('123456', 'admin', :password, 'Administrador del Sistema', 'admin', CURRENT_TIMESTAMP)
                 """)
                 
                 conn.execute(query, {'password': password_hash})
@@ -1928,9 +1948,10 @@ def pagina_login():
                 
                 try:
                     # Verificar credenciales usando función compatible con API REST
+                    # Nota: La tabla debe estar en el esquema 'public' para que funcione con API REST
                     query = """
                         SELECT id, username, role, nombre_completo, ultimo_cambio_password 
-                        FROM oxigeno.usuarios 
+                        FROM usuarios 
                         WHERE cedula = :cedula AND password = :password
                     """
                     
@@ -3772,7 +3793,7 @@ def pagina_administrar_usuarios():
                                             # Verificar si la cédula ya existe en otro usuario
                                             if cedula != usuario['cedula']:
                                                 query_check = text("""
-                                                    SELECT COUNT(*) FROM oxigeno.usuarios
+                                                    SELECT COUNT(*) FROM public.usuarios
                                                     WHERE cedula = :cedula AND id != :id
                                                 """)
                                                 result_check = conn.execute(query_check, {
@@ -3792,7 +3813,7 @@ def pagina_administrar_usuarios():
                                                 password_hash = hashlib.sha256(new_password.encode()).hexdigest()
                                                 
                                                 query = text("""
-                                                    UPDATE oxigeno.usuarios
+                                                    UPDATE public.usuarios
                                                     SET cedula = :cedula, nombre_completo = :nombre, role = :rol, 
                                                         password = :password, ultimo_cambio_password = CURRENT_TIMESTAMP
                                                     WHERE id = :id
@@ -3808,7 +3829,7 @@ def pagina_administrar_usuarios():
                                             else:
                                                 # Actualizar sin cambiar contraseña
                                                 query = text("""
-                                                    UPDATE oxigeno.usuarios
+                                                    UPDATE public.usuarios
                                                     SET cedula = :cedula, nombre_completo = :nombre, role = :rol
                                                     WHERE id = :id
                                                 """)
@@ -4280,7 +4301,7 @@ def pagina_cambiar_password():
                             password_hash_nueva = hashlib.sha256(password_nueva.encode()).hexdigest()
                             
                             query = text("""
-                                UPDATE oxigeno.usuarios
+                                UPDATE public.usuarios
                                 SET password = :password, ultimo_cambio_password = CURRENT_TIMESTAMP
                                 WHERE id = :user_id
                             """)
